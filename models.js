@@ -3,7 +3,27 @@
 // devices whose GPU lacks 16-bit float support. `ctx` is the context window
 // in tokens: smaller windows use less memory, so the 3B models get less.
 // Models with a `url` are hosted on this site rather than WebLLM's list.
+// Models with `engine: "gguf"` run through wllama (llama.cpp) instead of
+// WebLLM, which opens up GGUF files, the format uncensored models ship in.
 export const MODELS = [
+  {
+    id: "gguf:llama-3.2-1b-abliterated",
+    engine: "gguf",
+    repo: "Triangle104/Llama-3.2-1B-Instruct-abliterated-Q4_K_M-GGUF",
+    name: "Uncensored Llama 3.2 (1B)",
+    size: "≈0.8 GB download",
+    note: "No refusals: handles explicit scenes. Light and safe for iPhone, but writing is simpler.",
+    ctx: 4096,
+  },
+  {
+    id: "gguf:llama-3.2-3b-abliterated",
+    engine: "gguf",
+    repo: "Triangle104/Llama-3.2-3B-Instruct-abliterated-Q4_K_M-GGUF",
+    name: "Uncensored Llama 3.2 (3B)",
+    size: "≈2 GB download",
+    note: "No refusals and better writing, but slower and may be too big for Safari. Try the 1B first.",
+    ctx: 2048,
+  },
   {
     id: "Llama-3.2-1B-Instruct-q4f16_1-MLC",
     name: "Llama 3.2 (1B)",
@@ -41,12 +61,12 @@ export const MODELS = [
   },
 ];
 
-export const DEFAULT_MODEL = MODELS[0].id;
+export const DEFAULT_MODEL = "Llama-3.2-1B-Instruct-q4f16_1-MLC";
 export const CUSTOM_CTX = 2048;
 
 export function resolveModelId(id, hasF16) {
-  const hosted = MODELS.find((m) => m.id === id)?.url;
-  return hasF16 || hosted ? id : id.replace("q4f16_1", "q4f32_1");
+  const m = MODELS.find((x) => x.id === id);
+  return hasF16 || m?.url || m?.engine === "gguf" ? id : id.replace("q4f16_1", "q4f32_1");
 }
 
 // WebLLM model records for the models this site hosts itself.

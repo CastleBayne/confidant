@@ -2,6 +2,7 @@ import * as store from "./store.js";
 import { MODELS, DEFAULT_MODEL, CUSTOM_CTX, resolveModelId, hostedRecords } from "./models.js";
 import { freshWriting, initWriting, showWriting } from "./writing.js";
 import { stripDashes } from "./voice.js";
+import { isGgufDownloaded } from "./gguf-engine.js";
 import * as speech from "./speech.js";
 
 const DEFAULT_PERSONA = `You are {{name}}, my private companion. Our conversations are completely private: they never leave my phone and no one else will ever read them.
@@ -122,7 +123,8 @@ function modelConfig() {
   if (s.customUrl && s.customLib) {
     return { id: "custom-model", ctx: CUSTOM_CTX, custom: { model: s.customUrl, model_id: "custom-model", model_lib: s.customLib } };
   }
-  return { id: resolveModelId(s.model, hasF16), ctx: MODELS.find((m) => m.id === s.model)?.ctx ?? 2048 };
+  const m = MODELS.find((x) => x.id === s.model);
+  return { id: resolveModelId(s.model, hasF16), ctx: m?.ctx ?? 2048, gguf: m?.engine === "gguf" ? m : null };
 }
 
 const contextTokens = () => modelConfig().ctx;
@@ -173,10 +175,10 @@ async function appConfig(custom) {
 async function refreshFirstRun() {
   if (engine) return ($("first-run").hidden = true);
   const crashed = recoverFromCrash();
-  const { id, custom } = modelConfig();
+  const { id, custom, gguf } = modelConfig();
   const info = MODELS.find((m) => m.id === data.settings.model);
   const name = custom ? "your custom model" : info?.name ?? "the model";
-  const cached = await isDownloaded(id, custom);
+  const cached = gguf ? isGgufDownloaded(gguf) : await isDownloaded(id, custom);
   if (cached && !crashed) {
     $("first-run").hidden = true;
     loadModel(); // already downloaded: just start it
@@ -191,7 +193,7 @@ async function refreshFirstRun() {
 }
 
 async function loadModel() {
-  const { id, custom, ctx } = modelConfig();
+  const { id, custom, ctx, gguf } = modelConfig();
   if (engine && loadedModel === id) return;
   $("first-run").hidden = true;
   $("crash-note").hidden = true;
@@ -204,14 +206,27 @@ async function loadModel() {
   try {
     // A fresh worker per model frees the previous model's memory completely.
     await unloadEngine();
-    const { CreateWebWorkerMLCEngine } = await webllm();
-    worker = new Worker(new URL("./llm-worker.js", import.meta.url), { type: "module" });
     writeFlag(id);
     loadingId = id;
-    engine = await CreateWebWorkerMLCEngine(worker, id, {
-      initProgressCallback: onProgress,
-      appConfig: await appConfig(custom),
-    }, { context_window_size: ctx });
+    if (gguf) {
+      const { createGgufEngine } = await import("./gguf-engine.js");
+      engine = await createGgufEngine(gguf, {
+        ctx,
+        onProgress: (fraction, loaded, total) => onProgress({
+          progress: fraction,
+          text: fraction < 1
+            ? `Downloading model… ${(loaded / 1e9).toFixed(2)} of ${(total / 1e9).toFixed(2)} GB (keep this screen open)`
+            : "Starting up…",
+        }),
+      });
+    } else {
+      const { CreateWebWorkerMLCEngine } = await webllm();
+      worker = new Worker(new URL("./llm-worker.js", import.meta.url), { type: "module" });
+      engine = await CreateWebWorkerMLCEngine(worker, id, {
+        initProgressCallback: onProgress,
+        appConfig: await appConfig(custom),
+      }, { context_window_size: ctx });
+    }
     writeFlag(null);
     loadingId = null;
     loadedModel = id;
@@ -232,6 +247,7 @@ async function loadModel() {
 }
 
 function friendlyProgress(text = "") {
+  if (/^(Downloading model…|Starting up)/.test(text)) return text;
   const m = text.match(/Fetching param cache\[(\d+)\/(\d+)\]/);
   if (m) return `Downloading model… part ${m[1]} of ${m[2]} (keep this screen open)`;
   if (/Loading model from cache\[(\d+)\/(\d+)\]/.test(text)) return "Starting up…";
@@ -622,6 +638,10 @@ async function deleteModels() {
     try { await deleteModelAllInfoInCache(id, cfg); } catch {}
   }
   await unloadEngine();
+  try {
+    const { deleteGgufModels } = await import("./gguf-engine.js");
+    await deleteGgufModels(MODELS.filter((m) => m.engine === "gguf"));
+  } catch {}
   renderStorage();
   refreshFirstRun();
 }

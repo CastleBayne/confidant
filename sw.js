@@ -1,8 +1,11 @@
 // Lets the app open with no internet connection. When online, app files are
 // fetched fresh (bypassing the browser's HTTP cache) so updates arrive on
 // the next launch. Model files are cached separately by WebLLM.
-const VERSION = 11;
+const VERSION = 12;
 const CACHE = `confidant-app-v${VERSION}`;
+// Engine files are large and versioned by folder, so they live in a cache
+// that survives app updates instead of being downloaded again each time.
+const VENDOR_CACHE = "confidant-vendor-v1";
 const SHELL = [
   "./",
   "index.html",
@@ -15,7 +18,7 @@ const SHELL = [
   "docx.js",
   "speech.js",
   "llm-worker.js",
-  "vendor/web-llm/index.js",
+  "gguf-engine.js",
   "manifest.webmanifest",
   "icons/icon-192.png",
   "icons/icon-512.png",
@@ -37,15 +40,25 @@ self.addEventListener("activate", (e) => {
       .then(() => self.clients.claim()));
 });
 
-// The vendored engine never changes between releases, so serve it from cache.
+// Engine files never change within a release folder: cache first.
 // Everything else: network first, cache if offline or slow.
 self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== "GET" || url.origin !== location.origin) return;
+  if (url.pathname.includes("/vendor/")) {
+    e.respondWith(
+      caches.open(VENDOR_CACHE).then(async (cache) => {
+        const cached = await cache.match(e.request, { ignoreSearch: true });
+        if (cached) return cached;
+        const res = await fetch(e.request);
+        if (res.ok) cache.put(e.request, res.clone());
+        return res;
+      }));
+    return;
+  }
   e.respondWith(
     caches.open(CACHE).then(async (cache) => {
       const cached = await cache.match(e.request, { ignoreSearch: true });
-      if (cached && url.pathname.includes("/vendor/")) return cached;
       const network = fetch(e.request, { cache: "no-cache" }).then((res) => {
         if (res.ok) cache.put(e.request, res.clone());
         return res;
