@@ -30,6 +30,9 @@ jobs:
       - name: Install MLC LLM
         run: |
           pip install --pre -U -f https://mlc.ai/wheels mlc-llm-nightly-cpu mlc-ai-nightly-cpu huggingface_hub
+          # Runtime dependencies the nightly wheels don't always declare
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install psutil fastapi uvicorn shortuuid requests tqdm safetensors numpy ml_dtypes prompt_toolkit openai transformers sentencepiece tiktoken
           pip list 2>/dev/null | grep -i -E "mlc|tvm"
           python -c "import mlc_llm, tvm; print('mlc_llm', mlc_llm.__file__); print('tvm', tvm.__version__)"
 
