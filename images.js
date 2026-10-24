@@ -14,7 +14,27 @@ const MINOR_TERMS = /\b(child|children|kid|kids|minor|minors|underage|under-age|
 const ALWAYS_NEGATIVE = "child, teen, underage, young-looking, childlike, loli";
 const OLD_NEGATIVE = "lowres, blurry, bad anatomy, bad hands, extra fingers, deformed, watermark, text, signature";
 const DEFAULT_NEGATIVE = "lowres, blurry, bad anatomy, deformed face, disfigured, poorly drawn face, asymmetrical eyes, cross-eyed, bad hands, extra fingers, mutated hands, extra limbs, watermark, text, signature";
+// Always added: SD 1.5 often adds or fuses limbs and fingers.
+const ANATOMY_NEGATIVE = "bad anatomy, bad proportions, extra limbs, extra arms, extra legs, missing limbs, fused fingers, extra fingers, missing fingers, mutated hands, malformed hands, long neck, deformed body";
 const CFG = 6;
+
+// ADetailer (a free Forge extension) finds faces and hands after the picture
+// is made and redraws each one up close, which fixes most warped hands.
+async function hasAdetailer() {
+  try {
+    const { txt2img = [] } = await (await fetch(`${base()}/sdapi/v1/scripts`)).json();
+    return txt2img.some((n) => /adetailer/i.test(n));
+  } catch {
+    return false;
+  }
+}
+const ADETAILER = {
+  ADetailer: {
+    args: [true, false,
+      { ad_model: "face_yolov8n.pt", ad_denoising_strength: 0.4, ad_confidence: 0.3 },
+      { ad_model: "hand_yolov8n.pt", ad_denoising_strength: 0.45, ad_confidence: 0.3 }],
+  },
+};
 
 // SD 1.5 draws faces from very few pixels at 512 px, so they warp. "sharp"
 // redraws the picture 1.5x larger (hires fix); "repair" also runs Forge's
@@ -45,6 +65,21 @@ let editingChar = null;
 const persistCharacters = () => saveExtra("characters", characters).catch((e) => console.error("Saving characters failed", e));
 const store = () => saved ?? [];
 const persistImages = () => saveExtra("images", saved).catch((e) => console.error("Saving images failed", e));
+
+// Loads the characters (they're stored encrypted alongside the images).
+export async function loadCharacters() {
+  characters ??= (await loadExtra("characters")) ?? [];
+  return characters;
+}
+
+// Who's who, for the writing model, so it keeps characters straight.
+export function characterNotes(maxChars = 1500) {
+  const lines = (characters ?? []).filter((c) => c.description || c.bio)
+    .map((c) => `${c.name}: ${[c.description, c.bio].filter(Boolean).join(". ").replace(/\s+/g, " ")}`);
+  let out = "";
+  for (const l of lines) if (out.length + l.length < maxChars) out += (out ? "\n" : "") + l;
+  return out;
+}
 
 export function forgetImages() {
   saved = null;
@@ -192,7 +227,7 @@ async function generate() {
   const adapter = cast.length ? await faceAdapterModel(width > 768 || height > 768) : null;
   // Forge has 3 ControlNet slots by default; one per character, up to 3.
   const units = adapter
-    ? cast.slice(0, 3).map((c) => ({
+    ? cast.filter((c) => c.ref).slice(0, 3).map((c) => ({
         enabled: true,
         module: "CLIP-ViT-H (IPAdapter)",
         model: adapter,
@@ -204,6 +239,7 @@ async function generate() {
         guidance_end: 1,
       }))
     : [];
+  const fixer = (s.imageQuality ?? "repair") !== "fast" && await hasAdetailer();
   $("img-status").className = "muted";
   $("img-status").textContent = "Creating… the first image after starting Forge takes longer (and face repair downloads a small helper the first time).";
   const poll = setInterval(async () => {
@@ -218,7 +254,7 @@ async function generate() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         prompt,
-        negative_prompt: [s.imageNegative, ALWAYS_NEGATIVE].filter(Boolean).join(", "),
+        negative_prompt: [s.imageNegative, ANATOMY_NEGATIVE, ALWAYS_NEGATIVE].filter(Boolean).join(", "),
         width,
         height,
         steps: s.imageSteps,
@@ -226,7 +262,10 @@ async function generate() {
         ...qualityParams(s.imageQuality ?? "repair", width, height),
         sampler_name: "DPM++ 2M",
         scheduler: "Karras",
-        ...(units.length ? { alwayson_scripts: { ControlNet: { args: units } } } : {}),
+        alwayson_scripts: {
+          ...(units.length ? { ControlNet: { args: units } } : {}),
+          ...(fixer ? ADETAILER : {}),
+        },
       }),
     });
     if (!res.ok) throw new Error(`error ${res.status}`);
@@ -236,9 +275,11 @@ async function generate() {
     saved.unshift({ id: uid(), prompt, src: await toJpeg(image), created: Date.now() });
     saved.splice(MAX_SAVED);
     persistImages();
-    $("img-status").textContent = cast.length && !adapter
-      ? "Made from the characters' descriptions only. To match their faces too, install the face-reference model (see setup step 7)."
-      : "";
+    $("img-status").textContent = cast.some((c) => c.ref) && !adapter
+      ? "Made from the characters' descriptions only. To match their faces too, install the face-reference model (see setup step 8)."
+      : !fixer && (s.imageQuality ?? "repair") !== "fast"
+        ? "Tip: install ADetailer in Forge (setup step 9) to fix hands and faces automatically."
+        : "";
     $("img-status").className = "muted";
     renderGallery();
   } catch (e) {
@@ -346,8 +387,9 @@ function renderCharacters() {
     const label = document.createElement("label");
     label.htmlFor = pick.id;
     const img = document.createElement("img");
-    img.src = c.ref;
     img.alt = "";
+    if (c.ref) img.src = c.ref;
+    else img.className = "no-ref";
     const name = document.createElement("span");
     name.textContent = c.name;
     label.append(img, name);
@@ -366,6 +408,7 @@ function openCharEditor(c = null, src = null) {
   editingChar = c;
   $("char-name").value = c?.name ?? "";
   $("char-desc").value = c?.description ?? "";
+  $("char-bio").value = c?.bio ?? "";
   $("char-preview").src = c?.ref ?? src ?? "";
   $("char-preview").hidden = !(c?.ref ?? src);
   $("char-delete").hidden = !c;
@@ -383,13 +426,14 @@ function openCharEditor(c = null, src = null) {
 async function saveCharacter() {
   const name = $("char-name").value.trim();
   const description = $("char-desc").value.trim();
+  const bio = $("char-bio").value.trim();
   const ref = $("char-preview").hidden ? "" : $("char-preview").src;
-  if (!name || !ref) return alert("Give the character a name and a reference picture.");
-  if (MINOR_TERMS.test(`${name} ${description}`)) return alert("Characters must be adults.");
+  if (!name) return alert("Give the character a name.");
+  if (MINOR_TERMS.test(`${name} ${description} ${bio}`)) return alert("Characters must be adults.");
   characters ??= (await loadExtra("characters")) ?? [];
-  const small = await shrink(ref);
-  if (editingChar) Object.assign(editingChar, { name, description, ref: small });
-  else characters.push({ id: uid(), name, description, ref: small });
+  const small = ref ? await shrink(ref) : "";
+  if (editingChar) Object.assign(editingChar, { name, description, bio, ref: small });
+  else characters.push({ id: uid(), name, description, bio, ref: small });
   persistCharacters();
   $("char-editor").hidden = true;
   renderCharacters();

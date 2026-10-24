@@ -3,7 +3,7 @@
 import { AI_TELLS, offVoice, analyze, buildProfile, pickExcerpts, vocabularyCsv, checkText, words, stripDashes, countDashes } from "./voice.js";
 import { readDocx } from "./docx.js";
 import * as speech from "./speech.js";
-import { initImages, renderImages } from "./images.js";
+import { initImages, renderImages, characterNotes, loadCharacters } from "./images.js";
 
 const WRITE_TOKENS = 700;
 const CHARS_PER_TOKEN = 3.5;
@@ -490,6 +490,7 @@ export function writingContext(maxChars) {
   return [
     "I'm writing a book. You know it well and can talk about it, its characters and how I write.",
     names && `Characters and places: ${names}.`,
+    characterNotes() && `Character bios:\n${characterNotes()}`,
     profile && `How I write:\n${profile}`,
     `My book so far:\n\n${storySoFar(Math.round(maxChars * 0.6))}`,
   ].filter(Boolean).join("\n\n");
@@ -556,9 +557,12 @@ function manuscriptPrompt({ title, notes, text, excludeId }) {
   const chapterText = tail(text ?? "", Math.round(total * 0.3)).trimEnd();
   const note = (notes ?? "").trim().slice(0, 1500);
   // 0.85: the chars-per-token estimate is rough; leave headroom in the window.
-  const story = storySoFar(Math.max(800, Math.round(total * 0.85) - chapterText.length - note.length - 600), excludeId);
+  const castChars = characterNotes().length;
+  const story = storySoFar(Math.max(800, Math.round(total * 0.85) - chapterText.length - note.length - castChars - 600), excludeId);
+  const cast = castChars ? characterNotes() : "";
   return [
     `[Style: ${rules.join("; ")}.]`,
+    ...(cast ? [`[Characters:\n${cast}]`] : []),
     story,
     "* * *",
     title || "",
@@ -743,6 +747,7 @@ async function generate(mode) {
 
   const engine = await ctx.ensureEngine();
   if (!engine) return;
+  await loadCharacters();
 
   const { sys, user } = buildRequest(mode, ch, selection);
   undoState = { id: ch.id, text: ch.text };

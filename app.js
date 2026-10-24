@@ -2,7 +2,7 @@ import * as store from "./store.js";
 import { MODELS, DEFAULT_MODEL, CUSTOM_CTX, resolveModelId, hostedRecords } from "./models.js";
 import { freshWriting, initWriting, showWriting, writingContext, passagePrompt, followUpPrompt, inVoice, rewriteInVoice } from "./writing.js";
 import { stripDashes } from "./voice.js";
-import { freshImageSettings, forgetImages } from "./images.js";
+import { freshImageSettings, forgetImages, loadCharacters } from "./images.js";
 import { isGgufDownloaded } from "./gguf-engine.js";
 import { checkComputer } from "./remote-engine.js";
 import * as speech from "./speech.js";
@@ -359,6 +359,7 @@ async function send(text) {
   const bubble = document.querySelector(`[data-id="${reply.id}"] .bubble`);
   bubble.classList.add("typing");
   try {
+    await loadCharacters();
     // A pasted passage of the user's writing: continue it as their manuscript
     // (plain text, no chat framing), which keeps their voice far better.
     // Retry sends no text: reuse the last thing the user sent.
