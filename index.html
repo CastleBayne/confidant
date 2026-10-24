@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://huggingface.co https://*.huggingface.co https://*.hf.co https://raw.githubusercontent.com; img-src 'self' data: blob:; style-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="theme-color" content="#14111c">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Confidant">
+  <title>Confidant</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- Passcode screen -->
+  <section id="lock" class="screen" hidden>
+    <div class="lock-box">
+      <img src="icons/icon-192.png" alt="" class="lock-icon">
+      <h1>Confidant</h1>
+      <form id="unlock-form">
+        <input id="unlock-input" type="password" inputmode="text" autocomplete="current-password"
+               placeholder="Passcode" aria-label="Passcode" required>
+        <button type="submit" class="primary">Unlock</button>
+      </form>
+      <p id="unlock-error" class="error" hidden>Wrong passcode. Try again.</p>
+      <button id="forgot" class="link">Forgot passcode?</button>
+    </div>
+  </section>
+
+  <!-- Shown when the browser can't run models -->
+  <section id="unsupported" class="screen" hidden>
+    <div class="lock-box">
+      <h1>Your browser can't run the AI yet</h1>
+      <p>Confidant needs <strong>WebGPU</strong>, which Safari has on <strong>iOS 26 or newer</strong>.</p>
+      <ol class="steps">
+        <li>Update your iPhone: <em>Settings → General → Software Update</em>.</li>
+        <li>Open this page in <strong>Safari</strong>, not another app's built-in browser.</li>
+        <li>If it still fails, check <em>Settings → Apps → Safari → Advanced → Feature Flags</em> and turn on <strong>WebGPU</strong>.</li>
+      </ol>
+      <p id="unsupported-detail" class="muted"></p>
+    </div>
+  </section>
+
+  <!-- Main app -->
+  <div id="app" hidden>
+    <header class="topbar">
+      <button id="open-drawer" class="icon-btn" aria-label="Chats">
+        <svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+      </button>
+      <div class="title">
+        <span id="ai-name">Confidant</span>
+        <span id="status" class="status">Model not loaded</span>
+      </div>
+      <button id="new-chat" class="icon-btn" aria-label="New chat">
+        <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+      </button>
+      <button id="open-settings" class="icon-btn" aria-label="Settings">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+      </button>
+    </header>
+
+    <div id="loader" class="loader" hidden>
+      <div class="loader-text" id="loader-text">Getting ready…</div>
+      <div class="bar"><div id="loader-bar"></div></div>
+    </div>
+
+    <main id="messages" class="messages" aria-live="polite">
+      <div id="welcome" class="welcome">
+        <h2>Hi, I'm <span class="welcome-name">Confidant</span>.</h2>
+        <p>Everything we talk about stays on this phone. Nothing is sent to any company.</p>
+        <div id="first-run" hidden>
+          <p class="muted">First, download my brain. It's a one-time download of <span id="first-run-size"></span>, so use Wi-Fi. After that I work offline.</p>
+          <button id="load-model" class="primary">Download &amp; start</button>
+        </div>
+      </div>
+    </main>
+
+    <form id="composer" class="composer">
+      <textarea id="input" rows="1" placeholder="Message" aria-label="Message" enterkeyhint="send"></textarea>
+      <button id="send" type="submit" class="send" aria-label="Send">
+        <svg viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+      </button>
+      <button id="stop" type="button" class="send stop" aria-label="Stop" hidden>
+        <svg viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="1.5"/></svg>
+      </button>
+    </form>
+  </div>
+
+  <!-- Chat list -->
+  <aside id="drawer" class="drawer" hidden>
+    <div class="drawer-panel">
+      <div class="drawer-head">
+        <h2>Chats</h2>
+        <button id="close-drawer" class="icon-btn" aria-label="Close">
+          <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <ul id="chat-list" class="chat-list"></ul>
+    </div>
+    <div class="drawer-scrim" id="drawer-scrim"></div>
+  </aside>
+
+  <!-- Settings -->
+  <dialog id="settings" class="sheet">
+    <form method="dialog" class="sheet-inner" id="settings-form">
+      <div class="sheet-head">
+        <h2>Settings</h2>
+        <button value="close" class="link">Done</button>
+      </div>
+
+      <h3>Personality</h3>
+      <label>Its name
+        <input id="set-name" type="text" maxlength="40" autocomplete="off">
+      </label>
+      <label>What it should call you
+        <input id="set-username" type="text" maxlength="40" autocomplete="off" placeholder="Optional">
+      </label>
+      <label>Instructions
+        <textarea id="set-persona" rows="8"></textarea>
+        <small>How it should act and talk. <code>{{name}}</code> becomes its name.</small>
+      </label>
+      <button type="button" id="reset-persona" class="link">Reset to default</button>
+      <label>Creativity <span id="temp-value" class="muted"></span>
+        <input id="set-temp" type="range" min="0.2" max="1.4" step="0.1">
+        <small>Lower is more focused, higher is more playful and unpredictable.</small>
+      </label>
+
+      <h3>Model</h3>
+      <div id="model-list" class="model-list"></div>
+      <details class="advanced">
+        <summary>Use your own model (advanced)</summary>
+        <p class="muted">Any model compiled for WebLLM ("MLC" format) on Hugging Face. You need both links. Leave empty to use the list above.</p>
+        <label>Model link
+          <input id="set-custom-url" type="url" placeholder="https://huggingface.co/user/Model-q4f16_1-MLC" autocomplete="off">
+        </label>
+        <label>Model library (.wasm) link
+          <input id="set-custom-lib" type="url" placeholder="https://…/Model-q4f16_1-ctx4k_cs1k-webgpu.wasm" autocomplete="off">
+        </label>
+      </details>
+      <button type="button" id="apply-model" class="primary">Load selected model</button>
+
+      <h3>Memory</h3>
+      <label class="row">
+        <span>Remember things about me</span>
+        <input id="set-memory-on" type="checkbox" class="switch">
+      </label>
+      <small>Tap <strong>Remember</strong> under any of your messages, or add facts here. It reads these in every chat.</small>
+      <ul id="memory-list" class="memory-list"></ul>
+      <div class="memory-add">
+        <input id="memory-input" type="text" placeholder="e.g. I work night shifts" autocomplete="off">
+        <button type="button" id="memory-add" class="secondary">Add</button>
+      </div>
+
+      <h3>Privacy</h3>
+      <div id="passcode-off">
+        <label>Set a passcode
+          <input id="passcode-new" type="password" autocomplete="new-password" placeholder="At least 4 characters">
+        </label>
+        <button type="button" id="passcode-set" class="secondary">Turn on passcode</button>
+        <small>Encrypts your chats and memory. If you forget it, the only fix is to erase everything.</small>
+      </div>
+      <div id="passcode-on" hidden>
+        <p>Passcode is on. Your chats are encrypted.</p>
+        <label>Lock automatically
+          <select id="set-autolock">
+            <option value="0">As soon as I leave the app</option>
+            <option value="60">After 1 minute away</option>
+            <option value="300">After 5 minutes away</option>
+          </select>
+        </label>
+        <div class="btn-row">
+          <button type="button" id="lock-now" class="secondary">Lock now</button>
+          <button type="button" id="passcode-remove" class="secondary">Turn off passcode</button>
+        </div>
+      </div>
+
+      <h3>Storage</h3>
+      <p class="muted" id="storage-info"></p>
+      <div class="btn-row">
+        <button type="button" id="delete-models" class="secondary">Delete downloaded models</button>
+        <button type="button" id="erase-all" class="danger">Erase everything</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
