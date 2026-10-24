@@ -154,6 +154,12 @@ export function participleTails(text) {
   return [...text.matchAll(TAIL)].map((m) => m[0].replace(/^,\s+/, ""));
 }
 
+// True when a sentence has a habit the author doesn't: an "-ing" tail or a stock phrase.
+export function offVoice(sentence) {
+  const lower = ` ${sentence.toLowerCase().replace(/[^a-z' ]+/g, " ")} `;
+  return participleTails(sentence).length > 0 || CLICHES.some((t) => lower.includes(` ${t} `));
+}
+
 export function analyze(text) {
   const w = words(text);
   const total = w.length;

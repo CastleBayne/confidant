@@ -1,6 +1,6 @@
 // Writing studio: learn the user's voice from their own writing, then help
 // draft a book in that voice. All analysis and generation happen on-device.
-import { AI_TELLS, analyze, buildProfile, pickExcerpts, vocabularyCsv, checkText, words, stripDashes, countDashes } from "./voice.js";
+import { AI_TELLS, offVoice, analyze, buildProfile, pickExcerpts, vocabularyCsv, checkText, words, stripDashes, countDashes } from "./voice.js";
 import { readDocx } from "./docx.js";
 import * as speech from "./speech.js";
 import { initImages, renderImages } from "./images.js";
@@ -417,13 +417,67 @@ function exportBook() {
 
 // The author's own text, oldest first: imported writing, then the book's
 // other chapters. When it doesn't fit, the most recent part is kept.
+// The model copies what it reads last most closely, so the author's own
+// samples go last and get most of the room; Book chapters (which may hold
+// AI-written text) fill what's left before them.
 function storySoFar(maxChars, excludeId) {
   const w = W();
-  const all = [
-    ...w.samples.map((s) => s.text),
-    ...w.chapters.filter((c) => c.id !== excludeId && c.text.trim()).map((c) => `${c.title}\n\n${c.text}`),
-  ].join("\n\n* * *\n\n");
-  return all.length <= maxChars ? all : `…${tail(all, maxChars)}`;
+  const sep = "\n\n* * *\n\n";
+  const own = w.samples.map((s) => s.text).join(sep);
+  const book = w.chapters.filter((c) => c.id !== excludeId && c.text.trim()).map((c) => `${c.title}\n\n${c.text}`).join(sep);
+  if (!book) return own.length <= maxChars ? own : `…${tail(own, maxChars)}`;
+  if (!own) return book.length <= maxChars ? book : `…${tail(book, maxChars)}`;
+  const ownRoom = Math.min(own.length, Math.max(Math.round(maxChars * 0.65), maxChars - book.length));
+  const bookRoom = maxChars - ownRoom;
+  const ownPart = own.length <= ownRoom ? own : `…${tail(own, ownRoom)}`;
+  const bookPart = book.length <= bookRoom ? book : bookRoom > 500 ? `…${tail(book, bookRoom)}` : "";
+  return [bookPart, ownPart].filter(Boolean).join(sep);
+}
+
+const SENTENCE_END = /[.!?…]["”’]?\s+/;
+
+// Plain continuation that holds back any sentence with a habit the author
+// doesn't have and has the model write that sentence again (up to 3 times).
+// Ollama reuses the unchanged start of the prompt, so a retry is quick.
+export async function* inVoice(engine, { prompt, max_tokens, ...options }) {
+  let written = "";
+  let tries = 0;
+  while (true) {
+    const left = max_tokens - Math.round(written.length / 4);
+    if (left < 32) return;
+    let pending = "";
+    let redo = false;
+    try {
+      const stream = await engine.completions.create({ prompt: prompt + written, max_tokens: left, ...options });
+      for await (const chunk of stream) {
+        pending += chunk.choices[0]?.delta?.content ?? "";
+        let m;
+        while ((m = pending.match(SENTENCE_END))) {
+          const sentence = pending.slice(0, m.index + m[0].length);
+          if (offVoice(sentence) && tries < 3) {
+            tries++;
+            redo = true;
+            break;
+          }
+          tries = 0;
+          written += sentence;
+          pending = pending.slice(sentence.length);
+          yield { choices: [{ delta: { content: sentence } }] };
+        }
+        if (redo) break;
+      }
+    } catch (e) {
+      // A retry that writes nothing just means the passage is done.
+      if (written && /^The writing model/.test(e.message)) return;
+      throw e;
+    }
+    if (redo) {
+      engine.interruptGenerate();
+      continue;
+    }
+    if (pending) yield { choices: [{ delta: { content: pending } }] };
+    return;
+  }
 }
 
 // Voice profile plus the story so far, for chat. Empty until writing is added.
@@ -561,7 +615,7 @@ async function generate(mode) {
   try {
     const sampling = { max_tokens: WRITE_TOKENS, ...VARIETY[ctx.data().settings.writingVariety] ?? VARIETY.medium };
     const stream = engine.completions && mode !== "rewrite"
-      ? await engine.completions.create({ prompt: continuationPrompt(ch), stop: ["[", "* * *"], ...sampling })
+      ? inVoice(engine, { prompt: continuationPrompt(ch), stop: ["[", "* * *"], ...sampling })
       : await engine.chat.completions.create({
           messages: [{ role: "system", content: sys }, { role: "user", content: user }],
           stream: true,
