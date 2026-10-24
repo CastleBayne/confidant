@@ -1,6 +1,6 @@
 import * as store from "./store.js";
 import { MODELS, DEFAULT_MODEL, CUSTOM_CTX, resolveModelId, hostedRecords } from "./models.js";
-import { freshWriting, initWriting, showWriting, writingContext, passagePrompt, followUpPrompt, inVoice } from "./writing.js";
+import { freshWriting, initWriting, showWriting, writingContext, passagePrompt, followUpPrompt, inVoice, rewriteInVoice } from "./writing.js";
 import { stripDashes } from "./voice.js";
 import { freshImageSettings, forgetImages } from "./images.js";
 import { isGgufDownloaded } from "./gguf-engine.js";
@@ -408,6 +408,53 @@ async function send(text) {
   }
 }
 
+// Rewrites a chat reply in the author's voice, as a new reply right below it.
+async function rewriteMessage(m) {
+  if (generating) return;
+  const c = current();
+  const reply = { id: uid(), role: "assistant", content: "" };
+  c.messages.splice(c.messages.indexOf(m) + 1, 0, reply);
+  setGenerating(true);
+  renderMessages();
+  if (!engine) await loadModel();
+  if (!engine?.completions) {
+    c.messages = c.messages.filter((x) => x !== reply);
+    setGenerating(false);
+    renderMessages();
+    if (engine) alert("Rewrite in my voice needs the AI on your computer. Turn it on in Settings.");
+    return;
+  }
+  const bubble = document.querySelector(`[data-id="${reply.id}"] .bubble`);
+  bubble.classList.add("typing");
+  const t0 = Date.now();
+  let status = "Rewriting in your voice…";
+  const wait = () => !reply.content && (bubble.textContent = `${status} ${Math.round((Date.now() - t0) / 1000)}s`);
+  wait();
+  waitTimer = setInterval(wait, 1000);
+  const short = (name) => name.split("/").pop().replace(/-GGUF.*|:.*$/i, "");
+  try {
+    for await (const chunk of rewriteInVoice(engine, m.content, (msg) => { status = msg; wait(); })) {
+      reply.content += chunk.choices[0]?.delta?.content ?? "";
+      if (reply.content) clearInterval(waitTimer);
+      if (data.settings.noDashes) reply.content = stripDashes(reply.content);
+      bubble.innerHTML = format(reply.content);
+      scrollToBottom();
+    }
+    reply.via = `Your voice · rewrite · ${short(engine.lastWriter ?? data.settings.writingModel)}`;
+  } catch (e) {
+    console.error(e);
+    if (!reply.content) reply.content = `_Couldn't rewrite: ${e.message}_`;
+  } finally {
+    clearInterval(waitTimer);
+    bubble.classList.remove("typing");
+    setGenerating(false);
+    reply.content = reply.content.trim();
+    if (!reply.content) c.messages = c.messages.filter((x) => x !== reply);
+    renderMessages();
+    persist();
+  }
+}
+
 function regenerate() {
   const c = current();
   if (c.messages.at(-1)?.role === "assistant") c.messages.pop();
@@ -477,7 +524,11 @@ function renderMessages() {
           btn.textContent = "Remembered ✓";
         }));
       }
-      if (i === lastAssistant && i === c.messages.length - 1) actions.append(actionBtn("Retry", regenerate));
+      const rewritten = /rewrite/.test(m.via ?? "");
+      if (m.role === "assistant" && !/^Your voice/.test(m.via ?? "") && data.settings.computerOn) {
+        actions.append(actionBtn("Rewrite in my voice", () => rewriteMessage(m)));
+      }
+      if (i === lastAssistant && i === c.messages.length - 1 && !rewritten) actions.append(actionBtn("Retry", regenerate));
       actions.append(actionBtn("Delete", () => {
         c.messages = c.messages.filter((x) => x.id !== m.id);
         persist();

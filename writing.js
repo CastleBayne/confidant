@@ -626,6 +626,103 @@ export function followUpPrompt(messages, message) {
   return manuscriptPrompt({ notes: follow ? sceneNote(noteFrom(message.trim())) : sceneNote(message), text: "" });
 }
 
+// ---------- Rewrite in my voice ----------
+// The writing model can't follow "rewrite this", but it continues patterns.
+// So it is shown a few pairs: one of the author's own passages dressed up the
+// way the chat model writes, then the author's real version. After the pairs
+// comes the new draft, and the model writes the "author's version" of it.
+
+function sampleBlocks() {
+  const lines = W().samples.map((x) => x.text).join("\n").split(/\n+/).map((l) => l.trim()).filter(Boolean);
+  const blocks = [];
+  let cur = "";
+  for (const line of lines) {
+    cur = cur ? `${cur}\n\n${line}` : line;
+    if (cur.length >= 450) {
+      if (cur.length <= 1100) blocks.push(cur);
+      cur = "";
+    }
+  }
+  return blocks;
+}
+
+// Three passages spread through the samples, at least one with dialogue.
+function pickPairSources() {
+  const blocks = sampleBlocks();
+  if (blocks.length <= 3) return blocks;
+  const picks = [0.2, 0.5, 0.8].map((f) => blocks[Math.floor(f * (blocks.length - 1))]);
+  if (!picks.some((b) => /["“]/.test(b))) {
+    const talk = blocks.find((b) => /["“]/.test(b) && !picks.includes(b));
+    if (talk) picks[1] = talk;
+  }
+  return [...new Set(picks)];
+}
+
+async function chatText(engine, system, user, max_tokens) {
+  const stream = await engine.chat.completions.create({
+    messages: [{ role: "system", content: system }, { role: "user", content: user }],
+    stream: true,
+    temperature: 0.8,
+    max_tokens,
+  });
+  let out = "";
+  for await (const chunk of stream) out += chunk.choices[0]?.delta?.content ?? "";
+  return out.trim();
+}
+
+const DRESS_UP = "You rewrite fiction. Rewrite the passage as a typical modern AI-written novel would: flowing, ornate, emotional, lots of descriptive phrases and dialogue tags with adverbs. Keep exactly the same events, characters and dialogue meaning, and about the same length. Reply with only the rewritten passage.";
+
+async function voicePairs(engine, onStatus) {
+  const w = W();
+  const key = w.samples.map((x) => `${x.id}:${x.text.length}`).join(",");
+  if (w.voicePairs?.key === key && w.voicePairs.pairs.length) return w.voicePairs.pairs;
+  const sources = pickPairSources();
+  if (!sources.length) throw new Error("Rewrite in my voice needs some of your own writing. Add it under Book → Samples first.");
+  const pairs = [];
+  for (const [i, mine] of sources.entries()) {
+    onStatus?.(`Learning your voice (one time only)… ${i + 1} of ${sources.length}`);
+    const draft = await chatText(engine, DRESS_UP, mine, Math.round(mine.length / 2.5));
+    if (draft) pairs.push({ draft, mine });
+  }
+  w.voicePairs = { key, pairs };
+  ctx.persist();
+  return pairs;
+}
+
+// Splits a long draft into pieces of a few paragraphs, rewritten one at a time.
+function draftPieces(text, size = 1000) {
+  const paras = text.split(/\n\s*\n|\n/).map((p) => p.trim()).filter(Boolean);
+  const pieces = [];
+  let cur = "";
+  for (const p of paras) {
+    if (cur && cur.length + p.length > size) {
+      pieces.push(cur);
+      cur = "";
+    }
+    cur = cur ? `${cur}\n\n${p}` : p;
+  }
+  if (cur) pieces.push(cur);
+  return pieces;
+}
+
+// Streams the draft rewritten in the author's voice.
+export async function* rewriteInVoice(engine, draft, onStatus) {
+  const pairs = await voicePairs(engine, onStatus);
+  onStatus?.("Rewriting in your voice… the first part can take a minute.");
+  const head = "The same passages written twice: first a rough draft, then the author's own final version.\n\n" +
+    pairs.map((p) => `Draft:\n${p.draft}\n\nAuthor's version:\n${p.mine}`).join("\n\n* * *\n\n") + "\n\n* * *\n\n";
+  const pieces = draftPieces(draft);
+  for (const [i, piece] of pieces.entries()) {
+    if (i) yield { choices: [{ delta: { content: "\n\n" } }] };
+    yield* inVoice(engine, {
+      prompt: `${head}Draft:\n${piece}\n\nAuthor's version:\n`,
+      stop: ["Draft:", "* * *", "Author's version:"],
+      max_tokens: Math.round(piece.length / 3) + 80,
+      ...VARIETY.low,
+    });
+  }
+}
+
 async function generate(mode) {
   const ch = currentChapter();
   const area = $("chapter-text");
