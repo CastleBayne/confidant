@@ -81,8 +81,11 @@
         <p>Everything we talk about stays on this phone. Nothing is sent to any company.</p>
         <p id="crash-note" class="error" hidden></p>
         <div id="first-run" hidden>
-          <p class="muted">First, download my brain. It's a one-time download of <span id="first-run-size"></span>, so use Wi-Fi. After that I work offline.</p>
-          <button id="load-model" class="primary">Download &amp; start</button>
+          <p class="muted" id="first-run-text"></p>
+          <div class="btn-row center">
+            <button id="load-model" class="primary">Download &amp; start</button>
+            <button id="use-small" class="secondary" hidden>Use a smaller model</button>
+          </div>
         </div>
       </div>
     </main>
@@ -338,7 +341,7 @@
         <button type="button" id="delete-models" class="secondary">Delete downloaded models</button>
         <button type="button" id="erase-all" class="danger">Erase everything</button>
       </div>
-      <p class="muted version">Confidant version 10</p>
+      <p class="muted version">Confidant version 11</p>
     </form>
   </dialog>
 

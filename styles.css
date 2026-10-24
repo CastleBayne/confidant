@@ -317,3 +317,4 @@ dialog.sheet::backdrop { background: rgba(0, 0, 0, 0.5); }
   background: var(--accent); color: var(--accent-text);
 }
 .version { font-size: 13px; text-align: center; margin-top: 24px; }
+.btn-row.center { justify-content: center; }

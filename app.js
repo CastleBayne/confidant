@@ -23,6 +23,7 @@ let loadedModel = null;
 let hasF16 = true;
 let generating = false;
 let hiddenAt = 0;
+let loadingId = null; // model currently starting, if any
 
 function freshData() {
   return {
@@ -135,22 +136,28 @@ function writeFlag(v) {
 }
 
 // If Safari crashed while a model was starting, don't start it again
-// automatically (that loops the crash). Step down to the smallest model.
+// automatically (that loops the crash). Let the user retry or go smaller.
 function recoverFromCrash() {
   const crashed = readFlag();
-  if (!crashed) return false;
+  if (!crashed) return null;
   writeFlag(null);
   const was = MODELS.find((m) => resolveModelId(m.id, true) === crashed || resolveModelId(m.id, false) === crashed);
-  const note = $("crash-note");
-  if (was && was.id !== DEFAULT_MODEL && data.settings.model === was.id) {
-    data.settings.model = DEFAULT_MODEL;
-    persist();
-    note.textContent = `${was.name} was too big for Safari on this phone and crashed it, so I switched to ${MODELS[0].name}. Tap the button below to try again.`;
-  } else {
-    note.textContent = "Last time, the model crashed Safari while starting. Close other apps, then tap the button below to try again.";
+  $("crash-note").textContent = `Last time, ${was?.name ?? "the model"} stopped while starting. Safari may have run out of memory. If so, close other apps and try again, or use a smaller model.`;
+  $("crash-note").hidden = false;
+  $("use-small").hidden = !was || was.id === DEFAULT_MODEL;
+  return crashed;
+}
+
+// Checks WebLLM's model cache directly, so startup doesn't have to load the
+// whole engine just to decide which button to show.
+async function isDownloaded(id, custom) {
+  try {
+    const keys = await (await caches.open("webllm/model")).keys();
+    const needle = custom ? custom.model : `/${id}/`;
+    return keys.some((r) => r.url.includes(needle));
+  } catch {
+    return false;
   }
-  note.hidden = false;
-  return true;
 }
 
 async function webllm() {
@@ -167,23 +174,20 @@ async function refreshFirstRun() {
   if (engine) return ($("first-run").hidden = true);
   const crashed = recoverFromCrash();
   const { id, custom } = modelConfig();
-  const { hasModelInCache } = await webllm();
-  let cached = false;
-  try { cached = await hasModelInCache(id, await appConfig(custom)); } catch {}
+  const info = MODELS.find((m) => m.id === data.settings.model);
+  const name = custom ? "your custom model" : info?.name ?? "the model";
+  const cached = await isDownloaded(id, custom);
   if (cached && !crashed) {
     $("first-run").hidden = true;
     loadModel(); // already downloaded: just start it
-  } else if (cached) {
-    $("first-run-size").textContent = "";
-    $("load-model").textContent = "Start";
-    $("first-run").hidden = false;
-    setStatus("Model not started");
-  } else {
-    const info = MODELS.find((m) => m.id === data.settings.model);
-    $("first-run-size").textContent = custom ? "your custom model" : info?.size.replace("download", "").trim() ?? "about 2 GB";
-    $("first-run").hidden = false;
-    setStatus("Model not downloaded");
+    return;
   }
+  $("first-run-text").textContent = cached
+    ? `${name} is downloaded and ready to start.`
+    : `First, download my brain: ${name}, ${info?.size.replace("download", "").trim() ?? ""}. It's a one-time download, so Wi-Fi is best. After that I work offline.`;
+  $("load-model").textContent = cached ? `Start ${name}` : "Download & start";
+  $("first-run").hidden = false;
+  setStatus(cached ? "Model not started" : "Model not downloaded");
 }
 
 async function loadModel() {
@@ -203,16 +207,19 @@ async function loadModel() {
     const { CreateWebWorkerMLCEngine } = await webllm();
     worker = new Worker(new URL("./llm-worker.js", import.meta.url), { type: "module" });
     writeFlag(id);
+    loadingId = id;
     engine = await CreateWebWorkerMLCEngine(worker, id, {
       initProgressCallback: onProgress,
       appConfig: await appConfig(custom),
     }, { context_window_size: ctx });
     writeFlag(null);
+    loadingId = null;
     loadedModel = id;
     setStatus("Private · on this phone");
   } catch (e) {
     console.error(e);
     writeFlag(null);
+    loadingId = null;
     await unloadEngine();
     setStatus("Couldn't load model");
     alert(
@@ -660,6 +667,9 @@ async function lockNow() {
 }
 
 document.addEventListener("visibilitychange", async () => {
+  // Leaving the app mid-load isn't a crash: only a load that dies while the
+  // app is on screen should count as one on the next launch.
+  if (loadingId) writeFlag(document.hidden ? null : loadingId);
   if (document.hidden) {
     hiddenAt = Date.now();
     document.body.classList.add("privacy-blur");
@@ -721,6 +731,12 @@ input.addEventListener("keydown", (e) => {
 $("stop").addEventListener("click", () => engine?.interruptGenerate());
 
 $("load-model").addEventListener("click", loadModel);
+$("use-small").addEventListener("click", () => {
+  data.settings.model = DEFAULT_MODEL;
+  persist();
+  $("use-small").hidden = true;
+  refreshFirstRun().then(() => loadModel());
+});
 $("update-banner").addEventListener("click", () => location.reload());
 $("toggle-writing").addEventListener("click", () => showWriting($("writing").hidden));
 initWriting({
