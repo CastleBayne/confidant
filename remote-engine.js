@@ -39,7 +39,7 @@ export async function checkComputer(base, model) {
   return { ok: true, models, message: `Connected. ${model} is ready.` };
 }
 
-export async function createRemoteEngine({ base, model, ctx }) {
+export async function createRemoteEngine({ base, model, writeModel, ctx }) {
   const status = await checkComputer(base, model);
   if (!status.ok) throw new Error(status.message);
 
@@ -102,18 +102,21 @@ export async function createRemoteEngine({ base, model, ctx }) {
       async create({ prompt, max_tokens, temperature, top_p, frequency_penalty, presence_penalty, stop }) {
         const ac = new AbortController();
         abort = ac;
-        const res = await fetch(`${trimSlash(base)}/api/generate`, {
+        const generate = (name) => fetch(`${trimSlash(base)}/api/generate`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           signal: ac.signal,
           body: JSON.stringify({
-            model,
+            model: name,
             prompt,
             raw: true,
             stream: true,
             options: { num_ctx: ctx, num_predict: max_tokens, temperature, top_p, frequency_penalty, presence_penalty, stop },
           }),
         });
+        // A base model copies the author best; use the chat model if it isn't downloaded.
+        let res = await generate(writeModel || model);
+        if (res.status === 404 && writeModel && writeModel !== model) res = await generate(model);
         if (!res.ok) throw new Error(`Ollama error ${res.status}: ${await res.text()}`);
         const reader = res.body.getReader();
         const decoder = new TextDecoder();

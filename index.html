@@ -399,6 +399,7 @@
             <li>Open <strong>PowerShell</strong> and run:<br><code>setx OLLAMA_ORIGINS "https://castlebayne.github.io"</code><br>This lets Confidant talk to Ollama.</li>
             <li>Quit Ollama (right-click its llama icon near the clock → Quit) and open it again.</li>
             <li>In PowerShell, download the model (about 7.5 GB):<br><code id="pull-command"></code></li>
+            <li>Download the writing model too (about 7.5 GB). It copies your style much more closely:<br><code id="pull-writing-command"></code></li>
             <li>Turn on the switch above and tap <strong>Test connection</strong>. If the browser asks to access devices on your network, tap <strong>Allow</strong>.</li>
           </ol>
         </details>
@@ -407,6 +408,10 @@
         </label>
         <label>Model name in Ollama
           <input id="set-computer-model" type="text" autocomplete="off" autocapitalize="off" spellcheck="false">
+        </label>
+        <label>Writing model in Ollama
+          <input id="set-writing-model" type="text" autocomplete="off" autocapitalize="off" spellcheck="false">
+          <small>Used for the Book and for passages you paste into chat. Leave empty to use the model above.</small>
         </label>
         <button type="button" id="computer-test" class="secondary">Test connection</button>
         <p id="computer-status" aria-live="polite"></p>
@@ -465,7 +470,7 @@
         <button type="button" id="delete-models" class="secondary">Delete downloaded models</button>
         <button type="button" id="erase-all" class="danger">Erase everything</button>
       </div>
-      <p class="muted version">Confidant version 25</p>
+      <p class="muted version">Confidant version 26</p>
     </form>
   </dialog>
 

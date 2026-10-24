@@ -16,6 +16,8 @@ const ADULT_RULE = "I'm an adult and this is my private app. Explicit sexual con
 // fine-tune made for fiction, verified on Hugging Face.
 const COMPUTER_MODEL = "hf.co/bartowski/MN-12B-Mag-Mell-R1-GGUF:Q4_K_M";
 const COMPUTER_CTX = 8192;
+// A base (not chat-trained) model continues the author's pages in their own style.
+const WRITING_MODEL = "hf.co/mradermacher/Mistral-Nemo-Base-2407-GGUF:Q4_K_M";
 const LOADING_KEY = "confidant-loading"; // set while a model starts; left behind if Safari crashes
 const SETTINGS_VERSION = 2;
 const REPLY_TOKENS = 700;
@@ -50,6 +52,7 @@ function freshData() {
       computerOn: false,
       computerUrl: "http://localhost:11434",
       computerModel: COMPUTER_MODEL,
+      writingModel: WRITING_MODEL,
       adultContent: true,
       voiceURI: "",
       rate: 1,
@@ -134,7 +137,7 @@ async function checkWebGPU() {
 function modelConfig() {
   const s = data.settings;
   if (s.computerOn) {
-    return { id: `computer:${s.computerModel}`, ctx: COMPUTER_CTX, remote: { base: s.computerUrl, model: s.computerModel } };
+    return { id: `computer:${s.computerModel}`, ctx: COMPUTER_CTX, remote: { base: s.computerUrl, model: s.computerModel, writeModel: s.writingModel } };
   }
   if (s.customUrl && s.customLib) {
     return { id: "custom-model", ctx: CUSTOM_CTX, custom: { model: s.customUrl, model_id: "custom-model", model_lib: s.customLib } };
@@ -560,8 +563,10 @@ function openSettings() {
   $("set-computer-on").checked = s.computerOn;
   $("set-computer-url").value = s.computerUrl;
   $("set-computer-model").value = s.computerModel;
+  $("set-writing-model").value = s.writingModel;
   $("computer-status").textContent = "";
   $("pull-command").textContent = `ollama pull ${s.computerModel}`;
+  $("pull-writing-command").textContent = `ollama pull ${WRITING_MODEL}`;
   $("set-rate").value = s.rate;
   $("rate-value").textContent = `${s.rate}×`;
   $("set-autoread").checked = s.autoRead;
@@ -590,6 +595,7 @@ function saveSettings() {
   s.computerOn = $("set-computer-on").checked;
   s.computerUrl = $("set-computer-url").value.trim() || "http://localhost:11434";
   s.computerModel = $("set-computer-model").value.trim() || COMPUTER_MODEL;
+  s.writingModel = $("set-writing-model").value.trim();
   s.voiceURI = $("set-voice").value;
   s.rate = Number($("set-rate").value);
   s.autoRead = $("set-autoread").checked;
@@ -859,7 +865,11 @@ $("computer-test").addEventListener("click", async () => {
   const out = $("computer-status");
   out.textContent = "Checking…";
   const r = await checkComputer($("set-computer-url").value.trim(), $("set-computer-model").value.trim());
-  out.textContent = r.message;
+  const writing = $("set-writing-model").value.trim();
+  const hasWriting = !writing || r.models?.some((name) => name === writing || name === `${writing}:latest`);
+  out.textContent = r.ok && !hasWriting
+    ? `${r.message} The writing model isn't downloaded yet, so the Book uses the chat model. Run: ollama pull ${writing}`
+    : r.ok && writing ? `${r.message} Writing model is ready too.` : r.message;
   out.className = r.ok ? "ok" : "error";
 });
 $("set-computer-model").addEventListener("input", (e) => ($("pull-command").textContent = `ollama pull ${e.target.value.trim()}`));
