@@ -333,6 +333,8 @@ function contextMessages(history) {
   return [{ role: "system", content: system }, ...kept];
 }
 
+let waitTimer = null;
+
 async function send(text) {
   const c = current();
   if (text) {
@@ -359,7 +361,16 @@ async function send(text) {
   try {
     // A pasted passage of the user's writing: continue it as their manuscript
     // (plain text, no chat framing), which keeps their voice far better.
-    const manuscript = text && engine.completions ? passagePrompt(text) : null;
+    // Retry sends no text: reuse the last thing the user sent.
+    const asked = text ?? c.messages.findLast((m) => m.role === "user")?.content;
+    const manuscript = asked && engine.completions ? passagePrompt(asked) : null;
+    if (manuscript) {
+      // The writing model can take a minute to load and read the book; say so.
+      const t0 = Date.now();
+      const wait = () => !reply.content && (bubble.textContent = `Writing in your voice… ${Math.round((Date.now() - t0) / 1000)}s. The first reply can take a minute or two while the writing model loads and reads your book.`);
+      wait();
+      waitTimer = setInterval(wait, 1000);
+    }
     const stream = manuscript
       ? inVoice(engine, { prompt: manuscript, stop: ["[", "* * *"], max_tokens: REPLY_TOKENS, temperature: 0.9, top_p: 0.92, frequency_penalty: 0.4, presence_penalty: 0.3 })
       : await engine.chat.completions.create({
@@ -370,14 +381,16 @@ async function send(text) {
         });
     for await (const chunk of stream) {
       reply.content += chunk.choices[0]?.delta?.content ?? "";
+      if (reply.content) clearInterval(waitTimer);
       if (data.settings.noDashes) reply.content = stripDashes(reply.content);
       bubble.innerHTML = format(reply.content);
       scrollToBottom();
     }
   } catch (e) {
     console.error(e);
-    if (!reply.content) reply.content = /^The writing model/.test(e.message) ? `_${e.message}_` : "_Something went wrong. Try again, or pick a smaller model in Settings._";
+    if (!reply.content) reply.content = data.settings.computerOn ? `_Something went wrong: ${e.message}_` : "_Something went wrong. Try again, or pick a smaller model in Settings._";
   } finally {
+    clearInterval(waitTimer);
     bubble.classList.remove("typing");
     setGenerating(false);
     reply.content = reply.content.trim();
