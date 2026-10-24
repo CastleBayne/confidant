@@ -96,6 +96,49 @@ export async function createRemoteEngine({ base, model, ctx }) {
         },
       },
     },
+    // Plain text continuation (no chat framing): the model just keeps writing
+    // the text it's given, which copies the author's style far more closely.
+    completions: {
+      async create({ prompt, max_tokens, temperature, top_p, frequency_penalty, presence_penalty, stop }) {
+        const ac = new AbortController();
+        abort = ac;
+        const res = await fetch(`${trimSlash(base)}/api/generate`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: ac.signal,
+          body: JSON.stringify({
+            model,
+            prompt,
+            raw: true,
+            stream: true,
+            options: { num_ctx: ctx, num_predict: max_tokens, temperature, top_p, frequency_penalty, presence_penalty, stop },
+          }),
+        });
+        if (!res.ok) throw new Error(`Ollama error ${res.status}: ${await res.text()}`);
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        return (async function* () {
+          let buffered = "";
+          try {
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              buffered += decoder.decode(value, { stream: true });
+              const lines = buffered.split("\n");
+              buffered = lines.pop();
+              for (const line of lines) {
+                if (!line.trim()) continue;
+                const msg = JSON.parse(line);
+                if (msg.error) throw new Error(msg.error);
+                if (msg.response) yield { choices: [{ delta: { content: msg.response } }] };
+              }
+            }
+          } catch (e) {
+            if (!ac.signal.aborted) throw e;
+          }
+        })();
+      },
+    },
     interruptGenerate() {
       abort?.abort();
     },

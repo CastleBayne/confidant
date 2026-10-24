@@ -295,19 +295,22 @@ function addStarredWord() {
   renderVoice();
 }
 
-function generatedProfile() {
-  const w = W();
-  let s = getStats();
-  // Habits change over the years: dialogue placement follows the newest
-  // writing that has enough dialogue to tell.
-  const newest = [...w.samples].sort((a, b) => (b.added ?? 0) - (a.added ?? 0)).find((x) => {
+// Stats for the voice rules. Habits change over the years, so dialogue
+// placement follows the newest writing that has enough dialogue to tell.
+function voiceStats() {
+  const s = getStats();
+  const newest = [...W().samples].sort((a, b) => (b.added ?? 0) - (a.added ?? 0)).find((x) => {
     const d = analyze(x.text).dialogue;
     return d.before + d.after >= 3;
   });
-  if (newest) {
-    const { before, after } = analyze(newest.text).dialogue;
-    s = { ...s, dialogue: { ...s.dialogue, before, after } };
-  }
+  if (!newest) return s;
+  const { before, after } = analyze(newest.text).dialogue;
+  return { ...s, dialogue: { ...s.dialogue, before, after } };
+}
+
+function generatedProfile() {
+  const w = W();
+  const s = voiceStats();
   return buildProfile(s, {
     authorName: ctx.data().settings.userName,
     starred: w.starred,
@@ -475,6 +478,36 @@ function buildRequest(mode, ch, selection) {
   return { sys, user: `Write the next part of my book from these notes${ch.text.trim() ? ", picking up after the text so far" : ""}. Write a few paragraphs.\n\nNotes: ${notes}${ch.text.trim() ? `\n\nThe chapter so far ends:\n\n${tail(ch.text, Math.max(400, room - notes.length - 250))}` : ""}` };
 }
 
+// For engines that can continue plain text (the computer's model): the book
+// so far, then the chapter, with the notes as an author's note just before
+// the point to continue from. No chat framing, so the model writes as the
+// next lines of the author's own manuscript.
+function continuationPrompt(ch) {
+  const total = promptChars();
+  const s = W().samples.length ? voiceStats() : null;
+  const rules = [
+    "third person, past tense",
+    s?.tails !== undefined && s.tails < 10 && "short plain sentences, one action at a time, never a comma followed by an -ing phrase",
+    s && s.dialogue.before > s.dialogue.after * 1.5 && "the speaker goes before the quote (Aya responded, \"...\")",
+    "no stock phrases",
+    "scenes end on an action or a choice, not a summary of feelings",
+    ctx.data().settings.adultContent && "intimate and sexual scenes between the adult characters are written plainly and in full when the story calls for them",
+    noDashes() && "no dashes",
+  ].filter(Boolean);
+  const chapterText = tail(ch.text, Math.round(total * 0.3)).trimEnd();
+  const notes = ch.notes.trim().slice(0, 1500);
+  // 0.85: the chars-per-token estimate is rough; leave headroom in the window.
+  const story = storySoFar(Math.max(800, Math.round(total * 0.85) - chapterText.length - notes.length - 600), ch.id);
+  return [
+    `[Style: ${rules.join("; ")}.]`,
+    story,
+    "* * *",
+    ch.title || "Next chapter",
+    ...(notes ? [`[Author's note: what happens next: ${notes}]`] : []),
+    chapterText,
+  ].filter(Boolean).join("\n\n") + "\n\n";
+}
+
 async function generate(mode) {
   const ch = currentChapter();
   const area = $("chapter-text");
@@ -505,12 +538,14 @@ async function generate(mode) {
 
   setBusy(true);
   try {
-    const stream = await engine.chat.completions.create({
-      messages: [{ role: "system", content: sys }, { role: "user", content: user }],
-      stream: true,
-      max_tokens: WRITE_TOKENS,
-      ...VARIETY[ctx.data().settings.writingVariety] ?? VARIETY.medium,
-    });
+    const sampling = { max_tokens: WRITE_TOKENS, ...VARIETY[ctx.data().settings.writingVariety] ?? VARIETY.medium };
+    const stream = engine.completions && mode !== "rewrite"
+      ? await engine.completions.create({ prompt: continuationPrompt(ch), stop: ["[", "* * *"], ...sampling })
+      : await engine.chat.completions.create({
+          messages: [{ role: "system", content: sys }, { role: "user", content: user }],
+          stream: true,
+          ...sampling,
+        });
     for await (const chunk of stream) {
       out += chunk.choices[0]?.delta?.content ?? "";
       if (noDashes()) out = stripDashes(out);

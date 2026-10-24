@@ -44,6 +44,9 @@ export const CLICHES = [
   "mind racing", "mind raced", "lost in her own thoughts", "lost in his own thoughts", "lost in thought",
   "tinged with", "a hint of something", "something more intense", "a flush of", "a surge of", "eyes roaming",
   "twig snapped", "spun around", "barely noticed", "a pang of", "a wave of emotion",
+  "heart pounding", "breath caught", "with every fiber", "something shift", "warmth blossomed",
+  "a flicker of", "maybe, just maybe", "charged silence", "stark contrast", "searching hers",
+  "searching his", "cradling her face", "mingling with",
 ];
 
 const CONTRACTION = /\b\w+'(s|t|re|ve|ll|d|m)\b/gi;
