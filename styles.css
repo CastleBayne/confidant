@@ -338,3 +338,4 @@ dialog.viewer::backdrop { background: rgba(0, 0, 0, 0.7); }
 .char-card label { flex: 1; display: flex; align-items: center; gap: 10px; margin: 0 !important; cursor: pointer; }
 .char-card img { width: 48px; height: 48px; object-fit: cover; border-radius: 8px; }
 .char-preview { max-width: 160px; border-radius: 10px; display: block; }
+.flag-tail { text-decoration: underline dotted 2px var(--accent); text-underline-offset: 3px; }

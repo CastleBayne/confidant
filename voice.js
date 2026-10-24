@@ -41,6 +41,9 @@ export const CLICHES = [
   "without a second thought", "bit her lip", "raised an eyebrow", "ran a hand through", "exchanged a glance",
   "a knowing look", "something shifted", "hung in the air", "a flicker of", "a hint of a smile", "mind raced",
   "the world seemed to", "a testament to", "sent shivers", "a sense of", "the weight of",
+  "mind racing", "mind raced", "lost in her own thoughts", "lost in his own thoughts", "lost in thought",
+  "tinged with", "a hint of something", "something more intense", "a flush of", "a surge of", "eyes roaming",
+  "twig snapped", "spun around", "barely noticed", "a pang of", "a wave of emotion",
 ];
 
 const CONTRACTION = /\b\w+'(s|t|re|ve|ll|d|m)\b/gi;
@@ -130,8 +133,22 @@ function dialogueTags(text) {
     count(verbs, m[1].toLowerCase());
     if (m[2] && !["only", "early", "family", "really"].includes(m[2].toLowerCase())) count(adverbs, `${m[1].toLowerCase()} ${m[2].toLowerCase()}`);
   }
+  // Where the speaker goes: before the quote (Aya responded, "…") or after ("…," Aya said).
+  // Same line only, so a new paragraph after a quote isn't mistaken for a tag.
+  const q = text.replace(/[“”]/g, '"');
+  const before = (q.match(new RegExp(`\\b\\w+[ \\t]+(?:${SPEECH_VERBS})\\b[^"\\n]{0,25},[ \\t]*"`, "gi")) ?? []).length;
+  const after = (q.match(new RegExp(`[,?!.]"[ \\t]+(?:[A-Z]\\w*|he|she|they|I)[ \\t]+(?:${SPEECH_VERBS})\\b`, "g")) ?? []).length;
   const thoughts = (text.match(/\bthought to (?:himself|herself|themselves|myself)\b|\bsaid to (?:himself|herself|themselves|myself)\b/gi) ?? []).length;
-  return { verbs: top(verbs, 10, 1), adverbs: top(adverbs, 15, 1), thoughts };
+  return { verbs: top(verbs, 10, 1), adverbs: top(adverbs, 15, 1), thoughts, before, after };
+}
+
+// Phrases tacked onto the end of a sentence with a comma: ", her mind racing
+// with…", ", his voice tinged with…", ", lost in thought". AI prose is full of
+// them; many authors barely use them.
+const TAIL = /,\s+(?:(?:his|her|their|its|my|our)\s+\w+\s+)?(?:\w+ing|\w+ed|lost|now)\b[^.,!?;"“”]*/g;
+
+export function participleTails(text) {
+  return [...text.matchAll(TAIL)].map((m) => m[0].replace(/^,\s+/, ""));
 }
 
 export function analyze(text) {
@@ -201,6 +218,7 @@ export function analyze(text) {
     openers: top(openerCounts, 12, 2),
     names: top(new Map([...names.keys()].map((k) => [k, w.filter((x) => x === k).length])), 40, 2),
     dialogue: dialogueTags(text),
+    tails: per1k(participleTails(text).length, total),
     aiTellsUsed: AI_TELLS.filter((t) => lower.includes(` ${t} `)),
     clichesUsed: CLICHES.filter((t) => lower.includes(` ${t} `)),
     vocabulary: new Set(w),
@@ -294,6 +312,8 @@ export function buildProfile(stats, { authorName, starred = [], hidden = [], exc
       `- I tag dialogue with: ${d.verbs.slice(0, 6).map(([v]) => v).join(", ")}.`,
       ...(d.adverbs.length ? [`- I often add an adverb to the tag, like: ${d.adverbs.slice(0, 8).map(([a]) => a).join(", ")}.`] : []),
       ...(d.thoughts ? [`- Characters think to themselves in quotes ("he thought to himself").`] : []),
+      ...(d.before > d.after * 1.5 ? [`- I put the speaker BEFORE the quote, with a comma: Aya responded, "You will do better in time." Do this for most lines of dialogue.`] : []),
+      ...(d.after > d.before * 1.5 ? [`- I put the speaker after the quote: "You will do better in time," Aya said.`] : []),
     ] : []),
     ...(names.length ? ["", "CHARACTERS AND PLACES", names.slice(0, 25).join(", ")] : []),
     "",
@@ -307,6 +327,7 @@ export function buildProfile(stats, { authorName, starred = [], hidden = [], exc
     "- Write the way I write: my words, my rhythm, my punctuation. Plain words over fancy ones.",
     "- Don't tidy my style up, summarize, moralize, or end on a neat lesson.",
     "- Match my sentence lengths; don't make every sentence the same shape.",
+    ...(stats.tails !== undefined && stats.tails < 10 ? [`- I almost never tack -ing phrases onto the end of a sentence (", her mind racing with…", ", his voice tinged with…", ", his eyes roaming over…"). Write a new short sentence instead: "Her mind raced." Plain subject-verb sentences in the past tense, one action at a time.`] : []),
     "- Pick the specific, surprising word over the safe, expected one. Avoid stock phrases like: took a deep breath, heart pounded, eyes widened, couldn't help but, a wave of, raised an eyebrow, barely above a whisper.",
     ...(noDashes ? ["- NEVER use em dashes (—) or en dashes (–). Use a comma, a period or parentheses instead."] : []),
     ...(excerpts.length ? ["", "SAMPLES OF MY WRITING", ...excerpts.map((e) => `"""\n${noDashes ? stripDashes(e) : e}\n"""`)] : []),
@@ -352,5 +373,5 @@ export function checkText(text, stats) {
     0.15 * Math.max(0, 1 - ai.length / 3)));
 
   const cliches = CLICHES.filter((t) => ` ${words(text).join(" ")} `.includes(` ${t} `));
-  return { score, ai, cliches, unfamiliar, stats: s };
+  return { score, ai, cliches, unfamiliar, tails: participleTails(text), stats: s };
 }

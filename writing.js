@@ -297,7 +297,17 @@ function addStarredWord() {
 
 function generatedProfile() {
   const w = W();
-  const s = getStats();
+  let s = getStats();
+  // Habits change over the years: dialogue placement follows the newest
+  // writing that has enough dialogue to tell.
+  const newest = [...w.samples].sort((a, b) => (b.added ?? 0) - (a.added ?? 0)).find((x) => {
+    const d = analyze(x.text).dialogue;
+    return d.before + d.after >= 3;
+  });
+  if (newest) {
+    const { before, after } = analyze(newest.text).dialogue;
+    s = { ...s, dialogue: { ...s.dialogue, before, after } };
+  }
   return buildProfile(s, {
     authorName: ctx.data().settings.userName,
     starred: w.starred,
@@ -557,6 +567,14 @@ function runCheck() {
     notes.push(`Rhythm: sentence lengths swing by about ${r.stats.sentenceSpread} words (yours: ${mine.sentenceSpread}).${even ? " Too even. Mix in a much shorter or much longer sentence." : ""}`);
   }
   if (r.cliches.length) notes.push(`Familiar phrases (underlined in orange): ${r.cliches.join(", ")}`);
+  if (r.stats.totalWords >= 80 && mine.tails !== undefined) {
+    const many = r.stats.tails > Math.max(8, mine.tails * 2);
+    notes.push(`"-ing" tails like ", her mind racing…": ${r.stats.tails} per 1,000 words (yours: ${mine.tails}).${many ? " Too many: split them into separate short sentences (dotted underline)." : ""}`);
+  }
+  const d = r.stats.dialogue, md = mine.dialogue;
+  if (d && md && d.before + d.after >= 3 && md.before > md.after * 1.5 && d.after > d.before) {
+    notes.push(`Dialogue tags come after the quote here; you usually put the speaker first (Aya responded, "…").`);
+  }
   notes.push(`Contractions: ${r.stats.contractions} per 1,000 words (yours: ${mine.contractions}).`);
   if (r.unfamiliar.length) notes.push(`${r.unfamiliar.length} words you haven't used in your writing.`);
   $("check-notes").replaceChildren(...notes.map((n) => {
@@ -567,7 +585,7 @@ function runCheck() {
 
   // Build highlighted copy safely: text nodes for plain words, spans for flags.
   const ai = new Set(r.ai.filter((t) => !t.includes(" ")));
-  const phrases = [...r.cliches, ...r.ai.filter((t) => t.includes(" "))];
+  const phrases = [...r.cliches, ...r.ai.filter((t) => t.includes(" ")), ...(r.stats.tails > Math.max(8, (mine.tails ?? 0) * 2) ? r.tails : [])];
   const unfamiliar = new Set(r.unfamiliar);
   const box = $("check-highlight");
   box.replaceChildren();
@@ -590,7 +608,7 @@ function runCheck() {
     ? new RegExp(`(${phrases.map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/'/g, "['’]").replace(/ /g, "\\s+")).join("|")})`, "gi")
     : null;
   if (!phraseRe) return appendWords(text);
-  text.split(phraseRe).forEach((seg, i) => (i % 2 ? flag(ai.has(seg.toLowerCase()) || r.ai.includes(seg.toLowerCase().replace(/\s+/g, " ")) ? "flag-ai" : "flag-cliche", seg) : appendWords(seg)));
+  text.split(phraseRe).forEach((seg, i) => (i % 2 ? flag(ai.has(seg.toLowerCase()) || r.ai.includes(seg.toLowerCase().replace(/\s+/g, " ")) ? "flag-ai" : r.tails.includes(seg) ? "flag-tail" : "flag-cliche", seg) : appendWords(seg)));
 }
 
 // ---------- Files ----------
