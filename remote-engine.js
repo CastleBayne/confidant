@@ -102,6 +102,10 @@ export async function createRemoteEngine({ base, model, writeModel, ctx }) {
       async create({ prompt, max_tokens, temperature, top_p, frequency_penalty, presence_penalty, stop }) {
         const ac = new AbortController();
         abort = ac;
+        // Base models like to open with a bracketed note of their own, and a
+        // bare "[" stop would end the reply before a single word. Stop only
+        // on a note that starts a new line, and drop one that opens the reply.
+        const stops = (stop ?? []).map((s) => (s === "[" ? "\n[" : s));
         const generate = (name) => fetch(`${trimSlash(base)}/api/generate`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -111,31 +115,58 @@ export async function createRemoteEngine({ base, model, writeModel, ctx }) {
             prompt,
             raw: true,
             stream: true,
-            options: { num_ctx: ctx, num_predict: max_tokens, temperature, top_p, frequency_penalty, presence_penalty, stop },
+            options: { num_ctx: ctx, num_predict: max_tokens, temperature, top_p, frequency_penalty, presence_penalty, stop: stops },
           }),
         });
         // A base model copies the author best; use the chat model if it isn't downloaded.
-        let res = await generate(writeModel || model);
-        if (res.status === 404 && writeModel && writeModel !== model) res = await generate(model);
+        let name = writeModel || model;
+        let res = await generate(name);
+        if (res.status === 404 && name !== model) res = await generate((name = model));
         if (!res.ok) throw new Error(`Ollama error ${res.status}: ${await res.text()}`);
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        return (async function* () {
+
+        async function* pieces(res) {
+          const reader = res.body.getReader();
+          const decoder = new TextDecoder();
           let buffered = "";
-          try {
-            while (true) {
-              const { done, value } = await reader.read();
-              if (done) break;
-              buffered += decoder.decode(value, { stream: true });
-              const lines = buffered.split("\n");
-              buffered = lines.pop();
-              for (const line of lines) {
-                if (!line.trim()) continue;
-                const msg = JSON.parse(line);
-                if (msg.error) throw new Error(msg.error);
-                if (msg.response) yield { choices: [{ delta: { content: msg.response } }] };
-              }
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffered += decoder.decode(value, { stream: true });
+            const lines = buffered.split("\n");
+            buffered = lines.pop();
+            for (const line of lines) {
+              if (!line.trim()) continue;
+              const msg = JSON.parse(line);
+              if (msg.error) throw new Error(msg.error);
+              if (msg.response) yield msg.response;
             }
+          }
+        }
+
+        return (async function* () {
+          try {
+            // One more try if the model writes nothing at all.
+            for (let attempt = 0; attempt < 2; attempt++) {
+              if (attempt) res = await generate(name);
+              let lead = ""; // held back until it's clear the reply isn't a note
+              let started = false;
+              for await (const piece of pieces(res)) {
+                if (started) { yield { choices: [{ delta: { content: piece } }] }; continue; }
+                lead += piece;
+                const text = lead.trimStart();
+                if (!text) continue;
+                if (text.startsWith("[")) {
+                  const close = text.indexOf("]");
+                  if (close === -1) continue;
+                  lead = text.slice(close + 1);
+                  continue;
+                }
+                started = true;
+                yield { choices: [{ delta: { content: text } }] };
+              }
+              if (started) return;
+            }
+            throw new Error("The writing model didn't write anything. Tap Retry, or add a line saying what happens next.");
           } catch (e) {
             if (!ac.signal.aborted) throw e;
           }

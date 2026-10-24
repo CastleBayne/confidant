@@ -376,7 +376,7 @@ async function send(text) {
     }
   } catch (e) {
     console.error(e);
-    if (!reply.content) reply.content = "_Something went wrong. Try again, or pick a smaller model in Settings._";
+    if (!reply.content) reply.content = /^The writing model/.test(e.message) ? `_${e.message}_` : "_Something went wrong. Try again, or pick a smaller model in Settings._";
   } finally {
     bubble.classList.remove("typing");
     setGenerating(false);

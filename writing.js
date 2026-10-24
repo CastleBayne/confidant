@@ -576,7 +576,7 @@ async function generate(mode) {
     }
   } catch (e) {
     console.error(e);
-    alert("Writing stopped because of an error. Try a smaller model or a shorter selection.");
+    alert(/^The writing model/.test(e.message) ? e.message : "Writing stopped because of an error. Try a smaller model or a shorter selection.");
   } finally {
     ch.text = before + joiner + out.trim() + after;
     ch.updated = Date.now();
