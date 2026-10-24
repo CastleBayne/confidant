@@ -364,6 +364,11 @@ async function send(text) {
     // Retry sends no text: reuse the last thing the user sent.
     const asked = text ?? c.messages.findLast((m) => m.role === "user")?.content;
     const manuscript = asked && engine.completions ? passagePrompt(asked) : null;
+    const short = (name) => name.split("/").pop().replace(/-GGUF.*|:.*$/i, "");
+    reply.via = manuscript ? null
+      : !engine.completions ? "Chat model. Your-voice writing needs the computer's AI."
+      : asked && asked.length > 150 ? "Chat model: too short to continue as your book. Paste at least 5 lines of story."
+      : `Chat · ${short(data.settings.computerModel)}`;
     if (manuscript) {
       // The writing model can take a minute to load and read the book; say so.
       const t0 = Date.now();
@@ -381,6 +386,7 @@ async function send(text) {
         });
     for await (const chunk of stream) {
       reply.content += chunk.choices[0]?.delta?.content ?? "";
+      if (manuscript && !reply.via && engine.lastWriter) reply.via = `Your voice · ${short(engine.lastWriter)}`;
       if (reply.content) clearInterval(waitTimer);
       if (data.settings.noDashes) reply.content = stripDashes(reply.content);
       bubble.innerHTML = format(reply.content);
@@ -445,6 +451,12 @@ function renderMessages() {
     bubble.className = "bubble";
     bubble.innerHTML = format(m.content);
     row.append(bubble);
+    if (m.via && m.content) {
+      const via = document.createElement("small");
+      via.className = "via";
+      via.textContent = m.via;
+      row.append(via);
+    }
 
     if (m.content && !generating) {
       const actions = document.createElement("div");

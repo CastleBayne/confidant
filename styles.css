@@ -339,3 +339,5 @@ dialog.viewer::backdrop { background: rgba(0, 0, 0, 0.7); }
 .char-card img { width: 48px; height: 48px; object-fit: cover; border-radius: 8px; }
 .char-preview { max-width: 160px; border-radius: 10px; display: block; }
 .flag-tail { text-decoration: underline dotted 2px var(--accent); text-underline-offset: 3px; }
+
+.msg .via { display: block; margin: 2px 4px 0; font-size: 0.75rem; color: var(--muted, #888); }

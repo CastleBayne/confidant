@@ -44,7 +44,7 @@ export async function createRemoteEngine({ base, model, writeModel, ctx }) {
   if (!status.ok) throw new Error(status.message);
 
   let abort = null;
-  return {
+  const engine = {
     chat: {
       completions: {
         // OpenAI-style options in, Ollama's /api/chat out (it lets us set the context size).
@@ -122,6 +122,7 @@ export async function createRemoteEngine({ base, model, writeModel, ctx }) {
         let name = writeModel || model;
         let res = await generate(name);
         if (res.status === 404 && name !== model) res = await generate((name = model));
+        engine.lastWriter = name;
         if (!res.ok) throw new Error(`Ollama error ${res.status}: ${await res.text()}`);
 
         async function* pieces(res) {
@@ -180,4 +181,5 @@ export async function createRemoteEngine({ base, model, writeModel, ctx }) {
       abort?.abort();
     },
   };
+  return engine;
 }
