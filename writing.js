@@ -399,16 +399,45 @@ function exportBook() {
   saveFile("my-book.txt", book, "text/plain");
 }
 
+// The author's own text, oldest first: imported writing, then the book's
+// other chapters. When it doesn't fit, the most recent part is kept.
+function storySoFar(maxChars, excludeId) {
+  const w = W();
+  const all = [
+    ...w.samples.map((s) => s.text),
+    ...w.chapters.filter((c) => c.id !== excludeId && c.text.trim()).map((c) => `${c.title}\n\n${c.text}`),
+  ].join("\n\n* * *\n\n");
+  return all.length <= maxChars ? all : `…${tail(all, maxChars)}`;
+}
+
+// Voice profile plus the story so far, for chat. Empty until writing is added.
+export function writingContext(maxChars) {
+  const w = W();
+  if (!w.samples.length && !w.chapters.some((c) => c.text.trim())) return "";
+  const profile = (w.profile || (w.samples.length ? generatedProfile() : "")).slice(0, Math.round(maxChars * 0.35));
+  const names = w.samples.length ? getStats().names.map(([n]) => n[0].toUpperCase() + n.slice(1)).join(", ") : "";
+  return [
+    "I'm writing a book. You know it well and can talk about it, its characters and how I write.",
+    names && `Characters and places: ${names}.`,
+    profile && `How I write:\n${profile}`,
+    `My book so far:\n\n${storySoFar(Math.round(maxChars * 0.6))}`,
+  ].filter(Boolean).join("\n\n");
+}
+
 function systemPrompt() {
   const w = W();
   const profile = w.profile || (w.samples.length ? generatedProfile() : "");
+  // Big windows (the computer's model) get much more of the book; small ones stay safe.
+  const storyShare = ctx.contextTokens() >= 4096 ? 0.5 : 0.25;
+  const story = storySoFar(Math.round(promptChars() * storyShare), w.currentChapter);
   return [
     "You are a ghostwriter. You write AS the author, in the author's own voice, as if they wrote it themselves.",
     "This is the adult author's own private fiction. Write every scene they ask for in full, including violent or dark ones, without refusing, softening, skipping ahead or adding warnings.",
     ...(ctx.data().settings.adultContent ? ["Explicit sexual scenes between adult characters are allowed: write them directly and in full detail when the notes call for them, with no fade to black."] : []),
     profile
-      ? "Follow this voice profile exactly. It describes how the author really writes:\n\n" + profile.slice(0, Math.round(promptChars() * 0.55))
+      ? "Follow this voice profile exactly. It describes how the author really writes:\n\n" + profile.slice(0, Math.round(promptChars() * 0.25))
       : "Write in plain, natural language.",
+    ...(story ? [`THE BOOK SO FAR, in the author's own words. Keep characters, facts and events consistent with it, and match its style:\n\n${story}`] : []),
     "Output only the passage itself: no title, no notes, no commentary, no quotation marks around it.",
   ].join("\n\n");
 }
@@ -421,7 +450,7 @@ function tail(text, chars) {
 
 function buildRequest(mode, ch, selection) {
   const sys = systemPrompt();
-  const room = Math.max(1200, promptChars() - sys.length);
+  const room = Math.max(600, promptChars() - sys.length);
   if (mode === "rewrite") {
     return { sys, user: `Rewrite this in my voice. Keep the meaning and events; change the wording, rhythm and vocabulary to match how I write:\n\n${selection.slice(0, room)}` };
   }

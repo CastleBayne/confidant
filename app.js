@@ -1,6 +1,6 @@
 import * as store from "./store.js";
 import { MODELS, DEFAULT_MODEL, CUSTOM_CTX, resolveModelId, hostedRecords } from "./models.js";
-import { freshWriting, initWriting, showWriting } from "./writing.js";
+import { freshWriting, initWriting, showWriting, writingContext } from "./writing.js";
 import { stripDashes } from "./voice.js";
 import { isGgufDownloaded } from "./gguf-engine.js";
 import { checkComputer } from "./remote-engine.js";
@@ -44,6 +44,7 @@ function freshData() {
       customLib: "",
       memoryOn: true,
       noDashes: true,
+      writingInChat: true,
       computerOn: false,
       computerUrl: "http://localhost:11434",
       computerModel: COMPUTER_MODEL,
@@ -306,6 +307,11 @@ function systemPrompt() {
   if (s.memoryOn && data.memory.length) {
     p += "\n\nThings you know about me:\n" + data.memory.map((m) => `- ${m.text}`).join("\n");
   }
+  if (s.writingInChat) {
+    // Leave most of the window for the conversation itself.
+    const book = writingContext(Math.round((contextTokens() - REPLY_TOKENS) * CHARS_PER_TOKEN * 0.4));
+    if (book) p += "\n\n" + book;
+  }
   return p;
 }
 
@@ -541,6 +547,7 @@ function openSettings() {
   $("set-custom-lib").value = s.customLib;
   $("set-memory-on").checked = s.memoryOn;
   $("set-no-dashes").checked = s.noDashes;
+  $("set-writing-chat").checked = s.writingInChat;
   $("set-adult").checked = s.adultContent;
   $("set-autolock").value = String(s.autolock);
   $("set-computer-on").checked = s.computerOn;
@@ -570,6 +577,7 @@ function saveSettings() {
   s.customLib = $("set-custom-lib").value.trim();
   s.memoryOn = $("set-memory-on").checked;
   s.noDashes = $("set-no-dashes").checked;
+  s.writingInChat = $("set-writing-chat").checked;
   s.adultContent = $("set-adult").checked;
   s.autolock = Number($("set-autolock").value);
   s.computerOn = $("set-computer-on").checked;
