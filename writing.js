@@ -2,11 +2,20 @@
 // draft a book in that voice. All analysis and generation happen on-device.
 import { AI_TELLS, analyze, buildProfile, pickExcerpts, vocabularyCsv, checkText, words, stripDashes, countDashes } from "./voice.js";
 import { readDocx } from "./docx.js";
+import * as speech from "./speech.js";
 
 const WRITE_TOKENS = 700;
 const CHARS_PER_TOKEN = 3.5;
 // Room for the profile, the chapter context and the reply inside the model's window.
 const promptChars = () => (ctx.contextTokens() - WRITE_TOKENS) * CHARS_PER_TOKEN;
+
+// Sampling for book writing. Higher variety means less predictable word
+// choices and stronger penalties for repeating words and phrases.
+const VARIETY = {
+  low: { temperature: 0.75, top_p: 0.9, frequency_penalty: 0.2, presence_penalty: 0.1 },
+  medium: { temperature: 0.95, top_p: 0.92, frequency_penalty: 0.45, presence_penalty: 0.3 },
+  high: { temperature: 1.1, top_p: 0.95, frequency_penalty: 0.7, presence_penalty: 0.5 },
+};
 
 const $ = (id) => document.getElementById(id);
 const uid = () => crypto.randomUUID();
@@ -80,6 +89,11 @@ export function initWriting(context) {
     runCheck();
   });
   $("book-export").addEventListener("click", exportBook);
+  $("chapter-read").addEventListener("click", readChapter);
+  $("set-variety").addEventListener("change", (e) => {
+    ctx.data().settings.writingVariety = e.target.value;
+    ctx.persist();
+  });
 
   // Check
   $("check-run").addEventListener("click", runCheck);
@@ -335,6 +349,7 @@ function renderBook() {
   $("chapter-title").value = ch.title;
   $("chapter-notes").value = ch.notes;
   $("chapter-text").value = ch.text;
+  $("set-variety").value = ctx.data().settings.writingVariety ?? "medium";
   $("ai-undo").hidden = !undoState || undoState.id !== ch.id;
   renderCount();
 }
@@ -364,6 +379,19 @@ function deleteChapter() {
   renderBook();
 }
 
+// Reads the selected text, or the whole chapter if nothing is selected.
+function readChapter() {
+  const btn = $("chapter-read");
+  if (speech.speaking()) return speech.stop();
+  const area = $("chapter-text");
+  const selected = area.value.slice(area.selectionStart, area.selectionEnd);
+  const text = selected.trim() ? selected : area.value;
+  if (!text.trim()) return;
+  const s = ctx.data().settings;
+  btn.textContent = "Stop reading";
+  speech.speak(text, { voiceURI: s.voiceURI, rate: s.rate, onEnd: () => (btn.textContent = "Read aloud") });
+}
+
 function exportBook() {
   const book = W().chapters
     .map((c) => `${c.title}\n\n${c.text.trim()}`)
@@ -376,6 +404,8 @@ function systemPrompt() {
   const profile = w.profile || (w.samples.length ? generatedProfile() : "");
   return [
     "You are a ghostwriter. You write AS the author, in the author's own voice, as if they wrote it themselves.",
+    "This is the adult author's own private fiction. Write every scene they ask for in full, including violent or dark ones, without refusing, softening, skipping ahead or adding warnings.",
+    ...(ctx.data().settings.adultContent ? ["Explicit sexual scenes between adult characters are allowed: write them directly and in full detail when the notes call for them, with no fade to black."] : []),
     profile
       ? "Follow this voice profile exactly. It describes how the author really writes:\n\n" + profile.slice(0, Math.round(promptChars() * 0.55))
       : "Write in plain, natural language.",
@@ -436,8 +466,8 @@ async function generate(mode) {
     const stream = await engine.chat.completions.create({
       messages: [{ role: "system", content: sys }, { role: "user", content: user }],
       stream: true,
-      temperature: ctx.data().settings.temperature,
       max_tokens: WRITE_TOKENS,
+      ...VARIETY[ctx.data().settings.writingVariety] ?? VARIETY.medium,
     });
     for await (const chunk of stream) {
       out += chunk.choices[0]?.delta?.content ?? "";
@@ -490,6 +520,11 @@ function runCheck() {
   const dashes = countDashes(text);
   if (dashes) notes.push(`${dashes} em dash${dashes === 1 ? "" : "es"} (shown in red).`);
   notes.push(`Sentences average ${r.stats.avgSentence} words (yours: ${mine.avgSentence}).`);
+  if (r.stats.sentences >= 4 && mine.sentenceSpread) {
+    const even = r.stats.sentenceSpread < mine.sentenceSpread * 0.7;
+    notes.push(`Rhythm: sentence lengths swing by about ${r.stats.sentenceSpread} words (yours: ${mine.sentenceSpread}).${even ? " Too even. Mix in a much shorter or much longer sentence." : ""}`);
+  }
+  if (r.cliches.length) notes.push(`Familiar phrases (underlined in orange): ${r.cliches.join(", ")}`);
   notes.push(`Contractions: ${r.stats.contractions} per 1,000 words (yours: ${mine.contractions}).`);
   if (r.unfamiliar.length) notes.push(`${r.unfamiliar.length} words you haven't used in your writing.`);
   $("check-notes").replaceChildren(...notes.map((n) => {
@@ -500,25 +535,30 @@ function runCheck() {
 
   // Build highlighted copy safely: text nodes for plain words, spans for flags.
   const ai = new Set(r.ai.filter((t) => !t.includes(" ")));
+  const phrases = [...r.cliches, ...r.ai.filter((t) => t.includes(" "))];
   const unfamiliar = new Set(r.unfamiliar);
   const box = $("check-highlight");
   box.replaceChildren();
-  for (const part of text.split(/([A-Za-z’']+(?:-[A-Za-z’']+)*|—|–|--)/)) {
-    const key = part.toLowerCase().replace(/’/g, "'");
-    if (/^(—|–|--)$/.test(part)) {
-      const span = document.createElement("span");
-      span.className = "flag-ai";
-      span.textContent = part;
-      box.append(span);
-    } else if (ai.has(key) || unfamiliar.has(key)) {
-      const span = document.createElement("span");
-      span.className = ai.has(key) ? "flag-ai" : "flag-new";
-      span.textContent = part;
-      box.append(span);
-    } else {
-      box.append(document.createTextNode(part));
+  const flag = (cls, t) => {
+    const span = document.createElement("span");
+    span.className = cls;
+    span.textContent = t;
+    box.append(span);
+  };
+  const appendWords = (segment) => {
+    for (const part of segment.split(/([A-Za-z’']+(?:-[A-Za-z’']+)*|—|–|--)/)) {
+      const key = part.toLowerCase().replace(/’/g, "'");
+      if (/^(—|–|--)$/.test(part) || ai.has(key)) flag("flag-ai", part);
+      else if (unfamiliar.has(key)) flag("flag-new", part);
+      else if (part) box.append(document.createTextNode(part));
     }
-  }
+  };
+  // Phrases first (they span several words), then word-level flags in between.
+  const phraseRe = phrases.length
+    ? new RegExp(`(${phrases.map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/'/g, "['’]").replace(/ /g, "\\s+")).join("|")})`, "gi")
+    : null;
+  if (!phraseRe) return appendWords(text);
+  text.split(phraseRe).forEach((seg, i) => (i % 2 ? flag(ai.has(seg.toLowerCase()) || r.ai.includes(seg.toLowerCase().replace(/\s+/g, " ")) ? "flag-ai" : "flag-cliche", seg) : appendWords(seg)));
 }
 
 // ---------- Files ----------

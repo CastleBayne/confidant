@@ -311,3 +311,4 @@ dialog.sheet::backdrop { background: rgba(0, 0, 0, 0.5); }
 .highlight { white-space: pre-wrap; line-height: 1.6; }
 .flag-ai { color: var(--danger); font-weight: 700; }
 .flag-new { text-decoration: underline wavy var(--accent); text-underline-offset: 3px; }
+.flag-cliche { text-decoration: underline 2px #f0a040; text-underline-offset: 3px; }

@@ -27,6 +27,22 @@ export const AI_TELLS = [
   "a sense of", "couldn't help but", "little did", "sent shivers", "let out a breath", "a mix of",
 ];
 
+// Stock fiction phrases. Common in published books, so models lean on them
+// and detectors read them as predictable.
+export const CLICHES = [
+  "took a deep breath", "let out a breath", "let out a sigh", "breath he didn't know", "breath she didn't know",
+  "stopped in his tracks", "stopped in her tracks", "a chill ran down", "shivers down", "sent a chill",
+  "heart pounded", "heart raced", "heart skipped", "time stood still", "deafening silence", "the silence was deafening",
+  "eyes widened", "couldn't help but", "a wave of", "only mean one thing", "little did", "in the blink of an eye",
+  "all hell broke loose", "piercing gaze", "jaw dropped", "knuckles white", "a smile tugged", "corner of her mouth",
+  "corner of his mouth", "barely above a whisper", "for what felt like an eternity", "the air was thick",
+  "eyes sparkled", "steeled himself", "steeled herself", "squared his shoulders", "swallowed hard", "dead of night",
+  "calm before the storm", "every fiber of", "against all odds", "a force to be reckoned with", "as if on cue",
+  "without a second thought", "bit her lip", "raised an eyebrow", "ran a hand through", "exchanged a glance",
+  "a knowing look", "something shifted", "hung in the air", "a flicker of", "a hint of a smile", "mind raced",
+  "the world seemed to", "a testament to", "sent shivers", "a sense of", "the weight of",
+];
+
 const CONTRACTION = /\b\w+'(s|t|re|ve|ll|d|m)\b/gi;
 const DASH = /\s*(?:—|–|--)\s*/g;
 
@@ -67,6 +83,18 @@ function top(counts, n, min = 2) {
 
 function count(map, key) {
   map.set(key, (map.get(key) ?? 0) + 1);
+}
+
+function spread(a) {
+  if (a.length < 2) return 0;
+  const m = a.reduce((x, y) => x + y, 0) / a.length;
+  return Math.round(Math.sqrt(a.reduce((x, y) => x + (y - m) ** 2, 0) / a.length) * 10) / 10;
+}
+
+function percentile(a, p) {
+  if (!a.length) return 0;
+  const s = [...a].sort((x, y) => x - y);
+  return s[Math.min(s.length - 1, Math.floor(p * s.length))];
 }
 
 const per1k = (n, total) => (total ? Math.round((n / total) * 10000) / 10 : 0);
@@ -148,6 +176,9 @@ export function analyze(text) {
     uniqueWords: new Set(w).size,
     sentences: sents.length,
     avgSentence: avg(lengths),
+    // How much sentence length swings. People vary a lot; models stay even.
+    sentenceSpread: spread(lengths),
+    sentenceRange: [percentile(lengths, 0.1), percentile(lengths, 0.9)],
     shortShare: share((l) => l <= 8),
     longShare: share((l) => l >= 25),
     avgParagraph: avg(paras.map((p) => sentences(p).length)),
@@ -171,6 +202,7 @@ export function analyze(text) {
     names: top(new Map([...names.keys()].map((k) => [k, w.filter((x) => x === k).length])), 40, 2),
     dialogue: dialogueTags(text),
     aiTellsUsed: AI_TELLS.filter((t) => lower.includes(` ${t} `)),
+    clichesUsed: CLICHES.filter((t) => lower.includes(` ${t} `)),
     vocabulary: new Set(w),
   };
 }
@@ -240,6 +272,7 @@ export function buildProfile(stats, { authorName, starred = [], hidden = [], exc
     "",
     "RHYTHM",
     `- Sentences average ${stats.avgSentence} words. ${stats.shortShare}% are short (8 words or fewer), ${stats.longShare}% are long (25+).`,
+    ...(stats.sentenceRange ? [`- My sentence lengths swing a lot, usually anywhere from ${stats.sentenceRange[0]} to ${stats.sentenceRange[1]} words. Mix very short sentences and fragments with long ones. Never write several sentences of the same length or shape in a row.`] : []),
     `- Paragraphs average ${stats.avgParagraph} sentences.`,
     `- I write in the ${stats.pointOfView}.`,
     `- Contractions: ${describeRate(stats.contractions, { often: 15, some: 5 })} (${stats.contractions} per 1,000 words).`,
@@ -274,6 +307,7 @@ export function buildProfile(stats, { authorName, starred = [], hidden = [], exc
     "- Write the way I write: my words, my rhythm, my punctuation. Plain words over fancy ones.",
     "- Don't tidy my style up, summarize, moralize, or end on a neat lesson.",
     "- Match my sentence lengths; don't make every sentence the same shape.",
+    "- Pick the specific, surprising word over the safe, expected one. Avoid stock phrases like: took a deep breath, heart pounded, eyes widened, couldn't help but, a wave of, raised an eyebrow, barely above a whisper.",
     ...(noDashes ? ["- NEVER use em dashes (—) or en dashes (–). Use a comma, a period or parentheses instead."] : []),
     ...(excerpts.length ? ["", "SAMPLES OF MY WRITING", ...excerpts.map((e) => `"""\n${noDashes ? stripDashes(e) : e}\n"""`)] : []),
   ].join("\n");
@@ -317,5 +351,6 @@ export function checkText(text, stats) {
     0.15 * punct +
     0.15 * Math.max(0, 1 - ai.length / 3)));
 
-  return { score, ai, unfamiliar, stats: s };
+  const cliches = CLICHES.filter((t) => ` ${words(text).join(" ")} `.includes(` ${t} `));
+  return { score, ai, cliches, unfamiliar, stats: s };
 }

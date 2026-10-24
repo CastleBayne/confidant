@@ -1,12 +1,14 @@
 import * as store from "./store.js";
-import { MODELS, DEFAULT_MODEL, CUSTOM_CTX, resolveModelId } from "./models.js";
+import { MODELS, DEFAULT_MODEL, CUSTOM_CTX, resolveModelId, hostedRecords } from "./models.js";
 import { freshWriting, initWriting, showWriting } from "./writing.js";
 import { stripDashes } from "./voice.js";
+import * as speech from "./speech.js";
 
 const DEFAULT_PERSONA = `You are {{name}}, my private companion. Our conversations are completely private: they never leave my phone and no one else will ever read them.
 
 Talk with me openly and casually, like a close friend I trust. Be honest, warm and non-judgmental. Don't lecture me, moralize or add disclaimers, and don't shy away from personal, emotional or adult topics. Ask follow-up questions when it helps. Keep replies natural and fairly short unless I ask for more.`;
 
+const ADULT_RULE = "I'm an adult and this is my private app. Explicit sexual content between consenting adults is allowed here. When I ask for it, discuss or write it directly and in full detail: don't refuse, fade to black, change the subject, lecture me or add warnings. Characters in any sexual content are always adults.";
 const LOADING_KEY = "confidant-loading"; // set while a model starts; left behind if Safari crashes
 const SETTINGS_VERSION = 2;
 const REPLY_TOKENS = 700;
@@ -35,6 +37,11 @@ function freshData() {
       customLib: "",
       memoryOn: true,
       noDashes: true,
+      adultContent: true,
+      voiceURI: "",
+      rate: 1,
+      autoRead: false,
+      writingVariety: "medium",
       autolock: 60,
     },
     memory: [],
@@ -65,7 +72,7 @@ async function openApp() {
   const base = freshData();
   data = { ...base, ...data, settings: { ...base.settings, ...data.settings }, writing: { ...base.writing, ...data.writing } };
   // Version 1 defaulted to a 3B model that's too big for Safari on most iPhones.
-  if ((data.settings.version ?? 1) < 2) {
+  if ((data.settings.version ?? 1) < SETTINGS_VERSION) {
     data.settings.model = DEFAULT_MODEL;
     data.settings.version = SETTINGS_VERSION;
     persist();
@@ -145,9 +152,8 @@ async function webllm() {
 
 async function appConfig(custom) {
   const { prebuiltAppConfig } = await webllm();
-  return custom
-    ? { ...prebuiltAppConfig, model_list: [...prebuiltAppConfig.model_list, custom] }
-    : prebuiltAppConfig;
+  const extra = [...hostedRecords(), ...(custom ? [custom] : [])];
+  return { ...prebuiltAppConfig, model_list: [...prebuiltAppConfig.model_list, ...extra] };
 }
 
 async function refreshFirstRun() {
@@ -234,6 +240,7 @@ function systemPrompt() {
   let p = s.persona.replaceAll("{{name}}", s.name || "Confidant");
   if (s.userName) p += `\n\nMy name is ${s.userName}.`;
   if (s.noDashes) p += "\n\nNever use em dashes (—) or en dashes (–). Use commas or periods instead.";
+  if (s.adultContent) p += "\n\n" + ADULT_RULE;
   if (s.memoryOn && data.memory.length) {
     p += "\n\nThings you know about me:\n" + data.memory.map((m) => `- ${m.text}`).join("\n");
   }
@@ -299,6 +306,7 @@ async function send(text) {
     if (!reply.content) c.messages.pop();
     renderMessages();
     persist();
+    if (reply.content && data.settings.autoRead) readAloud(reply.id, reply.content);
   }
 }
 
@@ -351,6 +359,10 @@ function renderMessages() {
       const actions = document.createElement("div");
       actions.className = "actions";
       actions.append(actionBtn("Copy", () => navigator.clipboard?.writeText(m.content)));
+      if (m.role === "assistant" && speech.supported()) {
+        actions.append(actionBtn(readingId === m.id ? "Stop" : "Listen", () =>
+          readingId === m.id ? speech.stop() : readAloud(m.id, m.content)));
+      }
       if (m.role === "user") {
         const remembered = data.memory.some((x) => x.text === m.content);
         actions.append(actionBtn(remembered ? "Remembered ✓" : "Remember", (btn) => {
@@ -372,6 +384,22 @@ function renderMessages() {
     box.append(row);
   });
   scrollToBottom();
+}
+
+let readingId = null;
+
+function readAloud(id, text) {
+  readingId = id;
+  renderMessages();
+  speech.speak(text, {
+    voiceURI: data.settings.voiceURI,
+    rate: data.settings.rate,
+    onEnd: () => {
+      if (readingId !== id) return;
+      readingId = null;
+      if (data) renderMessages();
+    },
+  });
 }
 
 function actionBtn(label, fn) {
@@ -451,7 +479,12 @@ function openSettings() {
   $("set-custom-lib").value = s.customLib;
   $("set-memory-on").checked = s.memoryOn;
   $("set-no-dashes").checked = s.noDashes;
+  $("set-adult").checked = s.adultContent;
   $("set-autolock").value = String(s.autolock);
+  $("set-rate").value = s.rate;
+  $("rate-value").textContent = `${s.rate}×`;
+  $("set-autoread").checked = s.autoRead;
+  renderVoices();
   renderModelList();
   renderMemory();
   renderPasscode();
@@ -470,11 +503,26 @@ function saveSettings() {
   s.customLib = $("set-custom-lib").value.trim();
   s.memoryOn = $("set-memory-on").checked;
   s.noDashes = $("set-no-dashes").checked;
+  s.adultContent = $("set-adult").checked;
   s.autolock = Number($("set-autolock").value);
+  s.voiceURI = $("set-voice").value;
+  s.rate = Number($("set-rate").value);
+  s.autoRead = $("set-autoread").checked;
   const picked = document.querySelector('input[name="model"]:checked');
   if (picked) s.model = picked.value;
   applyName();
   persist();
+}
+
+async function renderVoices() {
+  const sel = $("set-voice");
+  const list = await speech.rankedVoices();
+  if (!list.length) {
+    sel.replaceChildren(new Option("No voices available", ""));
+    return;
+  }
+  sel.replaceChildren(...list.map((v) => new Option(speech.label(v), v.voiceURI)));
+  sel.value = list.some((v) => v.voiceURI === data.settings.voiceURI) ? data.settings.voiceURI : list[0].voiceURI;
 }
 
 function renderModelList() {
@@ -594,6 +642,7 @@ function showLock() {
 async function lockNow() {
   if (!(await store.hasPasscode())) return;
   if (generating) await engine?.interruptGenerate();
+  speech.stop();
   store.lock();
   data = null;
   $("messages").querySelectorAll(".msg").forEach((n) => n.remove());
@@ -652,6 +701,7 @@ $("composer").addEventListener("submit", (e) => {
   if (!text || generating) return;
   input.value = "";
   autosize();
+  if (data.settings.autoRead) speech.unlock();
   send(text);
 });
 // Return sends on a hardware keyboard; on the iPhone keyboard it's a new line.
@@ -690,6 +740,12 @@ $("settings-form").addEventListener("keydown", (e) => {
   }
 });
 $("set-temp").addEventListener("input", (e) => ($("temp-value").textContent = e.target.value));
+$("set-rate").addEventListener("input", (e) => ($("rate-value").textContent = `${e.target.value}×`));
+$("voice-test").addEventListener("click", () =>
+  speech.speak(`Hi, I'm ${$("set-name").value || "Confidant"}. This is how I'll sound when I read to you.`, {
+    voiceURI: $("set-voice").value,
+    rate: Number($("set-rate").value),
+  }));
 $("reset-persona").addEventListener("click", () => ($("set-persona").value = DEFAULT_PERSONA));
 $("memory-add").addEventListener("click", addMemory);
 $("apply-model").addEventListener("click", async () => {

@@ -168,6 +168,13 @@
         <label>Notes for this chapter
           <textarea id="chapter-notes" rows="4" placeholder="What happens, who's there, how it should feel. Rough notes are fine."></textarea>
         </label>
+        <label>Writing variety
+          <select id="set-variety">
+            <option value="low">Low: safer, more predictable</option>
+            <option value="medium">Medium (recommended)</option>
+            <option value="high">High: least predictable, can get odd</option>
+          </select>
+        </label>
         <label>Draft
           <textarea id="chapter-text" rows="14" placeholder="Your chapter text"></textarea>
         </label>
@@ -180,6 +187,7 @@
         <div class="btn-row">
           <button type="button" id="ai-stop" class="secondary" hidden>Stop</button>
           <button type="button" id="ai-undo" class="secondary" hidden>Undo AI text</button>
+          <button type="button" id="chapter-read" class="link">Read aloud</button>
           <button type="button" id="chapter-check" class="link">Check this chapter's voice</button>
           <button type="button" id="book-export" class="link">Save whole book</button>
           <button type="button" id="chapter-delete" class="link danger-link">Delete chapter</button>
@@ -188,7 +196,7 @@
       </div>
 
       <div class="tab-panel" data-panel="check" hidden>
-        <p class="muted">Paste any text to see how much it sounds like you. Typical AI words show in <span class="flag-ai">red</span>, and words you've never used in your writing are <span class="flag-new">underlined</span>.</p>
+        <p class="muted">Paste any text to see how much it sounds like you. Typical AI words show in <span class="flag-ai">red</span>, familiar stock phrases are <span class="flag-cliche">underlined in orange</span>, and words you've never used in your writing are <span class="flag-new">underlined</span>.</p>
         <textarea id="check-input" rows="8" placeholder="Paste text to check"></textarea>
         <button type="button" id="check-run" class="primary">Check</button>
         <div id="check-result" hidden>
@@ -249,10 +257,29 @@
         <input id="set-no-dashes" type="checkbox" class="switch">
       </label>
       <small>Swaps any dash it writes for a comma, in chats and in your book.</small>
+      <label class="row">
+        <span>Allow explicit adult content</span>
+        <input id="set-adult" type="checkbox" class="switch">
+      </label>
+      <small>Tells the model you're an adult and it may write sexual content between adults in chats and your book. How far it goes still depends on the model: Hermes 3 is the most willing.</small>
       <label>Creativity <span id="temp-value" class="muted"></span>
         <input id="set-temp" type="range" min="0.2" max="1.4" step="0.1">
         <small>Lower is more focused, higher is more playful and unpredictable.</small>
       </label>
+
+      <h3>Voice</h3>
+      <label>Reading voice
+        <select id="set-voice"></select>
+      </label>
+      <small>For a more natural voice, download one free on your iPhone: <em>Settings → Accessibility → Read &amp; Speak → Voices → English</em>, then pick one marked <strong>Premium</strong> or <strong>Enhanced</strong> (Ava and Zoe are good). Reopen the app and choose it here.</small>
+      <label>Speed <span id="rate-value" class="muted"></span>
+        <input id="set-rate" type="range" min="0.6" max="1.4" step="0.05">
+      </label>
+      <label class="row">
+        <span>Read replies aloud automatically</span>
+        <input id="set-autoread" type="checkbox" class="switch">
+      </label>
+      <button type="button" id="voice-test" class="secondary">Test voice</button>
 
       <h3>Model</h3>
       <div id="model-list" class="model-list"></div>
