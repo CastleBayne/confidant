@@ -604,13 +604,26 @@ const FOLLOW_UP = /^\s*(ok(ay)?,?\s+|now\s+|please\s+)*((can|could|will) you\s+)
 // A short request on its own ("Write what happens next: ...", "continue")
 // carries on the story from earlier in the chat: the last passage the user
 // pasted plus the replies written in their voice since.
+// With no story in the chat, a request to write a scene carries on from the
+// book itself (samples and chapters), so nothing has to be pasted.
+const WRITE_SCENE = /^\s*(ok(ay)?,?\s+|now\s+|please\s+)*((can|could|will) you\s+)?(please\s+)?write\b(?!.*\b(poem|email|e-mail|letter|essay|summary|list|outline|blurb|synopsis|review|code)\b)/i;
+const sceneNote = (message) => message.trim()
+  .replace(/^\s*(ok(ay)?,?\s+|now\s+|please\s+)*((can|could|will) you\s+)?(please\s+)?write\s+(me\s+)?((a|the|an)\s+(scene|chapter|part|bit)\s*)?((where|in which|about|of|with)\s+)?/i, "")
+  .replace(/^./, (c) => c.toUpperCase());
+
 export function followUpPrompt(messages, message) {
-  if (message.length > 400 || !FOLLOW_UP.test(message)) return null;
+  if (message.length > 600) return null;
+  const follow = FOLLOW_UP.test(message);
+  if (!follow && !WRITE_SCENE.test(message)) return null;
   const start = messages.findLastIndex((m) => m.role === "user" && isStory(splitAsk(m.content).passage, true));
-  if (start === -1) return null;
-  const story = [splitAsk(messages[start].content).passage,
-    ...messages.slice(start + 1).filter((m) => m.role === "assistant" && /^Your voice/.test(m.via ?? "")).map((m) => m.content)];
-  return manuscriptPrompt({ notes: noteFrom(message.trim()), text: story.join("\n\n") });
+  if (start !== -1) {
+    const story = [splitAsk(messages[start].content).passage,
+      ...messages.slice(start + 1).filter((m) => m.role === "assistant" && /^Your voice/.test(m.via ?? "")).map((m) => m.content)];
+    return manuscriptPrompt({ notes: follow ? sceneNote(noteFrom(message.trim())) : sceneNote(message), text: story.join("\n\n") });
+  }
+  const w = W();
+  if (!w.samples.length && !w.chapters.some((c) => c.text.trim())) return null;
+  return manuscriptPrompt({ notes: follow ? sceneNote(noteFrom(message.trim())) : sceneNote(message), text: "" });
 }
 
 async function generate(mode) {
