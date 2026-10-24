@@ -231,6 +231,42 @@
           </div>
         </div>
 
+        <h3>Reference library</h3>
+        <small>Upload pictures once and pick them for any image. Poses copy the body position, outfits copy the clothes, scenes copy the setting and mood. AI-generated or drawn pictures of adults only.</small>
+        <details class="ref-group">
+          <summary>Poses</summary>
+          <div id="ref-list-pose" class="ref-list"></div>
+          <label class="secondary file-btn">+ Add poses
+            <input id="ref-file-pose" type="file" accept="image/*" multiple hidden>
+          </label>
+        </details>
+        <details class="ref-group">
+          <summary>Outfits</summary>
+          <div id="ref-list-outfit" class="ref-list"></div>
+          <label class="secondary file-btn">+ Add outfits
+            <input id="ref-file-outfit" type="file" accept="image/*" multiple hidden>
+          </label>
+        </details>
+        <details class="ref-group">
+          <summary>Scenes</summary>
+          <div id="ref-list-scene" class="ref-list"></div>
+          <label class="secondary file-btn">+ Add scenes
+            <input id="ref-file-scene" type="file" accept="image/*" multiple hidden>
+          </label>
+        </details>
+
+        <div id="ref-pickers" class="ref-pickers" hidden>
+          <label hidden>Pose
+            <select id="ref-pick-pose"></select>
+          </label>
+          <label hidden>Outfit
+            <select id="ref-pick-outfit"></select>
+          </label>
+          <label hidden>Scene
+            <select id="ref-pick-scene"></select>
+          </label>
+        </div>
+
         <label>Describe the picture
           <textarea id="img-prompt" rows="4" placeholder="e.g. woman with long black hair in a loose knot, candlelit room, fireplace, cinematic lighting, photo"></textarea>
         </label>
@@ -294,6 +330,7 @@
             <li>Back here, open <strong>Image settings → Test connection</strong>.</li>
             <li>For character faces: download the face-reference model (98 MB) into <code>webui\models\ControlNet</code>:<br><code>huggingface.co/h94/IP-Adapter/resolve/main/models/ip-adapter-plus-face_sd15.safetensors</code><br>then restart Forge. The first character picture downloads a 2.5 GB helper automatically, so it takes a while once.</li>
             <li>To fix hands and faces automatically: in Forge open <strong>Extensions → Install from URL</strong>, paste <code>https://github.com/Bing-su/adetailer</code>, tap <strong>Install</strong>, then close and restart Forge. Confidant uses it by itself from then on.</li>
+            <li>For the reference library, download two more models into <code>webui\models\ControlNet</code>, then restart Forge:<br>Poses (1.4 GB): <code>huggingface.co/lllyasviel/ControlNet-v1-1/resolve/main/control_v11p_sd15_openpose.pth</code><br>Outfits and scenes (98 MB): <code>huggingface.co/h94/IP-Adapter/resolve/main/models/ip-adapter-plus_sd15.safetensors</code><br>Forge uses up to 3 references per picture: a pose, an outfit or scene, and character faces share those 3.</li>
           </ol>
         </details>
       </div>
@@ -474,7 +511,7 @@
         <button type="button" id="delete-models" class="secondary">Delete downloaded models</button>
         <button type="button" id="erase-all" class="danger">Erase everything</button>
       </div>
-      <p class="muted version">Confidant version 35</p>
+      <p class="muted version">Confidant version 36</p>
     </form>
   </dialog>
 
@@ -485,11 +522,44 @@
       <div class="btn-row">
         <button type="button" id="img-viewer-save" class="primary">Save</button>
         <button type="button" id="img-viewer-reuse" class="secondary">Use description</button>
+        <button type="button" id="img-viewer-edit" class="secondary">Edit part of it</button>
         <button type="button" id="img-viewer-character" class="secondary">Make a character from this</button>
         <button type="button" id="img-viewer-delete" class="danger">Delete</button>
         <button value="close" class="link">Close</button>
       </div>
     </form>
+  </dialog>
+
+  <dialog id="img-editor" class="viewer">
+    <div class="viewer-inner">
+      <p class="muted">Paint over only the part to change, like the clothes. Everything you don't paint stays exactly the same.</p>
+      <div class="edit-stage">
+        <img id="edit-pic" alt="">
+        <canvas id="edit-mask"></canvas>
+      </div>
+      <div class="btn-row edit-tools">
+        <label class="edit-brush">Brush size
+          <input id="edit-brush" type="range" min="10" max="160" value="50">
+        </label>
+        <button type="button" id="edit-erase" class="secondary" aria-pressed="false">Eraser</button>
+        <button type="button" id="edit-clear" class="secondary">Clear</button>
+      </div>
+      <label>What the painted part should become
+        <textarea id="edit-prompt" rows="2" placeholder="e.g. nude, bare skin, natural body"></textarea>
+      </label>
+      <label>How much to change it
+        <select id="edit-strength">
+          <option value="0.6">A little (keeps shapes)</option>
+          <option value="0.8" selected>Normal</option>
+          <option value="0.95">Completely</option>
+        </select>
+      </label>
+      <p id="edit-status" aria-live="polite"></p>
+      <div class="btn-row">
+        <button type="button" id="edit-apply" class="primary">Apply edit</button>
+        <button type="button" id="edit-close" class="link">Close</button>
+      </div>
+    </div>
   </dialog>
 
   <script type="module" src="app.js"></script>

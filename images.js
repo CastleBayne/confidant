@@ -62,6 +62,9 @@ const S = () => ctx.data().settings;
 let saved = null; // loaded on first use; cleared when the app locks
 let characters = null; // [{ id, name, description, ref }], same lifecycle
 let editingChar = null;
+let refs = null; // reference library: [{ id, kind: "pose"|"outfit"|"scene", name, src }]
+const persistRefs = () => saveExtra("refs", refs).catch((e) => console.error("Saving references failed", e));
+const REF_KINDS = { pose: "Pose", outfit: "Outfit", scene: "Scene" };
 const persistCharacters = () => saveExtra("characters", characters).catch((e) => console.error("Saving characters failed", e));
 const store = () => saved ?? [];
 const persistImages = () => saveExtra("images", saved).catch((e) => console.error("Saving images failed", e));
@@ -84,6 +87,7 @@ export function characterNotes(maxChars = 1500) {
 export function forgetImages() {
   saved = null;
   characters = null;
+  refs = null;
 }
 
 // Character references: scaled down so storage stays small and Forge gets a
@@ -113,6 +117,24 @@ async function faceAdapterModel(large) {
   }
 }
 
+// ControlNet models and preprocessors installed in Forge, for references.
+async function controlnetLists() {
+  try {
+    const [models, modules] = await Promise.all([
+      fetch(`${base()}/controlnet/model_list`).then((r) => r.json()),
+      fetch(`${base()}/controlnet/module_list`).then((r) => r.json()),
+    ]);
+    return { models: models.model_list ?? [], modules: modules.module_list ?? [] };
+  } catch {
+    return { models: [], modules: [] };
+  }
+}
+const styleAdapter = (models) => models.find((m) => /ip-adapter/i.test(m) && !/face|sdxl/i.test(m) && /plus/i.test(m))
+  ?? models.find((m) => /ip-adapter/i.test(m) && !/face|sdxl/i.test(m)) ?? null;
+const poseModel = (models) => models.find((m) => /openpose/i.test(m) && !/sdxl/i.test(m)) ?? null;
+const posePreprocessor = (modules) => modules.find((m) => /^dw_openpose_full$/i.test(m))
+  ?? modules.find((m) => /^openpose_full$/i.test(m)) ?? modules.find((m) => /openpose/i.test(m)) ?? "openpose_full";
+
 // PNGs from the image program are large; JPEG keeps storage small.
 async function toJpeg(pngBase64) {
   const img = new Image();
@@ -133,6 +155,7 @@ export function freshImageSettings() {
 export function initImages(context) {
   ctx = context;
   $("img-generate").addEventListener("click", generate);
+  setupEditor();
   $("img-stop").addEventListener("click", () => fetch(`${base()}/sdapi/v1/interrupt`, { method: "POST" }).catch(() => {}));
   $("img-from-notes").addEventListener("click", promptFromNotes);
   $("char-add").addEventListener("click", () => openCharEditor());
@@ -152,6 +175,13 @@ export function initImages(context) {
       URL.revokeObjectURL(url);
     }
   });
+  for (const kind of Object.keys(REF_KINDS)) {
+    $(`ref-file-${kind}`).addEventListener("change", async (e) => {
+      const files = [...e.target.files];
+      e.target.value = "";
+      if (files.length) await addRefs(kind, files);
+    });
+  }
   $("img-test").addEventListener("click", async () => {
     $("img-status").textContent = "Checking…";
     const r = await checkImages(base());
@@ -169,7 +199,9 @@ export function initImages(context) {
 export async function renderImages() {
   saved ??= (await loadExtra("images")) ?? [];
   characters ??= (await loadExtra("characters")) ?? [];
+  refs ??= (await loadExtra("refs")) ?? [];
   renderCharacters();
+  renderRefs();
   const s = S();
   $("img-face-weight").value = String(s.imageFaceWeight ?? 0.7);
   s.imageQuality ??= "repair";
@@ -225,20 +257,31 @@ async function generate() {
   const [width, height] = s.imageSize.split("x").map(Number);
   setBusy(true);
   const adapter = cast.length ? await faceAdapterModel(width > 768 || height > 768) : null;
-  // Forge has 3 ControlNet slots by default; one per character, up to 3.
-  const units = adapter
-    ? cast.filter((c) => c.ref).slice(0, 3).map((c) => ({
-        enabled: true,
-        module: "CLIP-ViT-H (IPAdapter)",
-        model: adapter,
-        weight: (s.imageFaceWeight ?? 0.7) / Math.max(1, Math.min(cast.length, 3) * 0.75),
-        image: c.ref,
-        resize_mode: "Crop and Resize",
-        control_mode: "Balanced",
-        guidance_start: 0,
-        guidance_end: 1,
-      }))
-    : [];
+  const chosen = Object.fromEntries(Object.keys(REF_KINDS).map((k) => [k, (refs ?? []).find((r) => r.id === $(`ref-pick-${k}`)?.value)]));
+  const lists = Object.values(chosen).some(Boolean) ? await controlnetLists() : { models: [], modules: [] };
+  const missing = [];
+  const unit = (module, model, weight, image) => ({ enabled: true, module, model, weight, image,
+    resize_mode: "Crop and Resize", control_mode: "Balanced", guidance_start: 0, guidance_end: 1 });
+  // Order of importance when Forge's 3 slots run out: the pose (it fixes the
+  // body), then faces, then the outfit, then the scene.
+  const ordered = [];
+  if (chosen.pose) {
+    const model = poseModel(lists.models);
+    if (model) ordered.push({ what: "pose", unit: { ...unit(posePreprocessor(lists.modules), model, 1, chosen.pose.src), processor_res: 512 } });
+    else missing.push("pose");
+  }
+  const faced = adapter ? cast.filter((c) => c.ref) : [];
+  for (const c of faced) {
+    ordered.push({ what: `${c.name}'s face`, unit: unit("CLIP-ViT-H (IPAdapter)", adapter, (s.imageFaceWeight ?? 0.7) / Math.max(1, Math.min(faced.length, 3) * 0.75), c.ref) });
+  }
+  const style = styleAdapter(lists.models);
+  for (const [kind, weight] of [["outfit", 0.55], ["scene", 0.4]]) {
+    if (!chosen[kind]) continue;
+    if (style) ordered.push({ what: kind, unit: unit("CLIP-ViT-H (IPAdapter)", style, weight, chosen[kind].src) });
+    else missing.push(kind);
+  }
+  const units = ordered.slice(0, 3).map((o) => o.unit);
+  const skipped = ordered.slice(3).map((o) => o.what);
   const fixer = (s.imageQuality ?? "repair") !== "fast" && await hasAdetailer();
   $("img-status").className = "muted";
   $("img-status").textContent = "Creating… the first image after starting Forge takes longer (and face repair downloads a small helper the first time).";
@@ -275,7 +318,11 @@ async function generate() {
     saved.unshift({ id: uid(), prompt, src: await toJpeg(image), created: Date.now() });
     saved.splice(MAX_SAVED);
     persistImages();
-    $("img-status").textContent = cast.some((c) => c.ref) && !adapter
+    $("img-status").textContent = missing.length
+      ? `Made without your ${missing.length > 1 ? `${missing.slice(0, -1).join(", ")} and ${missing.at(-1)}` : missing[0]} reference${missing.length > 1 ? "s" : ""}. To use ${missing.length > 1 ? "them" : "it"}, download the models in setup step 10.`
+      : skipped.length
+        ? `Forge can use 3 references at once, so ${skipped.join(" and ")} ${skipped.length > 1 ? "were" : "was"} left out. Pick fewer.`
+        : cast.some((c) => c.ref) && !adapter
       ? "Made from the characters' descriptions only. To match their faces too, install the face-reference model (see setup step 8)."
       : !fixer && (s.imageQuality ?? "repair") !== "fast"
         ? "Tip: install ADetailer in Forge (setup step 9) to fix hands and faces automatically."
@@ -348,6 +395,10 @@ function openViewer(img) {
     dlg.close();
     openCharEditor(null, img.src);
   };
+  $("img-viewer-edit").onclick = () => {
+    dlg.close();
+    openEditor(img);
+  };
   $("img-viewer-reuse").onclick = () => {
     $("img-prompt").value = img.prompt;
     dlg.close();
@@ -371,6 +422,220 @@ function openViewer(img) {
     renderGallery();
   };
   dlg.showModal();
+}
+
+// ---------- Edit part of a picture (inpainting) ----------
+// Only pictures made here can be edited, never uploaded photos, so this can't
+// be used on a real person. The painted area is redrawn; the rest is kept.
+
+let editing = null; // the gallery image being edited
+let erasing = false;
+
+function openEditor(img) {
+  editing = img;
+  const pic = $("edit-pic");
+  const mask = $("edit-mask");
+  pic.onload = () => {
+    mask.width = pic.naturalWidth;
+    mask.height = pic.naturalHeight;
+  };
+  pic.src = img.src;
+  $("edit-status").textContent = "";
+  $("edit-status").className = "";
+  $("img-editor").showModal();
+}
+
+function setupEditor() {
+  const mask = $("edit-mask");
+  const g = mask.getContext("2d");
+  let drawing = false;
+  let last = null;
+  const point = (e) => {
+    const r = mask.getBoundingClientRect();
+    return [(e.clientX - r.left) * (mask.width / r.width), (e.clientY - r.top) * (mask.height / r.height)];
+  };
+  const stroke = (from, to) => {
+    const r = mask.getBoundingClientRect();
+    g.globalCompositeOperation = erasing ? "destination-out" : "source-over";
+    g.strokeStyle = "rgb(255, 40, 120)";
+    g.lineCap = g.lineJoin = "round";
+    g.lineWidth = Number($("edit-brush").value) * (mask.width / r.width) * 0.5;
+    g.beginPath();
+    g.moveTo(...from);
+    g.lineTo(...to);
+    g.stroke();
+  };
+  mask.addEventListener("pointerdown", (e) => {
+    drawing = true;
+    mask.setPointerCapture(e.pointerId);
+    last = point(e);
+    stroke(last, last);
+  });
+  mask.addEventListener("pointermove", (e) => {
+    if (!drawing) return;
+    const p = point(e);
+    stroke(last, p);
+    last = p;
+  });
+  for (const ev of ["pointerup", "pointercancel"]) mask.addEventListener(ev, () => (drawing = false));
+  $("edit-erase").addEventListener("click", () => {
+    erasing = !erasing;
+    $("edit-erase").setAttribute("aria-pressed", String(erasing));
+  });
+  $("edit-clear").addEventListener("click", () => g.clearRect(0, 0, mask.width, mask.height));
+  $("edit-close").addEventListener("click", () => $("img-editor").close());
+  $("edit-apply").addEventListener("click", applyEdit);
+}
+
+// White where painted, black elsewhere: the mask format Forge expects.
+function maskImage() {
+  const mask = $("edit-mask");
+  const out = document.createElement("canvas");
+  out.width = mask.width;
+  out.height = mask.height;
+  const data = mask.getContext("2d").getImageData(0, 0, mask.width, mask.height);
+  let painted = 0;
+  for (let i = 0; i < data.data.length; i += 4) {
+    const on = data.data[i + 3] > 0;
+    if (on) painted++;
+    data.data[i] = data.data[i + 1] = data.data[i + 2] = on ? 255 : 0;
+    data.data[i + 3] = 255;
+  }
+  out.getContext("2d").putImageData(data, 0, 0);
+  return painted ? out.toDataURL("image/png") : null;
+}
+
+async function applyEdit() {
+  if (busy || !editing) return;
+  const status = $("edit-status");
+  const change = $("edit-prompt").value.trim();
+  const mask = maskImage();
+  if (!mask) return (status.textContent = "Paint over the part you want to change first.");
+  if (!change) return (status.textContent = "Describe what the painted part should become.");
+  if (MINOR_TERMS.test(`${change} ${editing.prompt}`)) {
+    status.className = "error";
+    return (status.textContent = "Confidant won't make images involving anyone under 18.");
+  }
+  const s = S();
+  const pic = $("edit-pic");
+  busy = true;
+  $("edit-apply").disabled = true;
+  status.className = "muted";
+  status.textContent = "Editing…";
+  const poll = setInterval(async () => {
+    try {
+      const p = await (await fetch(`${base()}/sdapi/v1/progress?skip_current_image=true`)).json();
+      if (p.progress > 0) status.textContent = `Editing… ${Math.round(p.progress * 100)}%`;
+    } catch {}
+  }, 1500);
+  try {
+    const res = await fetch(`${base()}/sdapi/v1/img2img`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        init_images: [editing.src],
+        mask,
+        prompt: `${change}, same person, same lighting, photo`,
+        negative_prompt: [s.imageNegative, ANATOMY_NEGATIVE, ALWAYS_NEGATIVE,
+          /\b(nude|naked|bare|topless|undressed|no clothes)\b/i.test(change) && "clothes, fabric, underwear"].filter(Boolean).join(", "),
+        denoising_strength: Number($("edit-strength").value),
+        inpainting_fill: 1, // start from the original pixels, so shapes and skin tone carry over
+        inpaint_full_res: true, // redraw the painted area up close for detail
+        inpaint_full_res_padding: 48,
+        mask_blur: 8,
+        width: pic.naturalWidth,
+        height: pic.naturalHeight,
+        steps: s.imageSteps,
+        cfg_scale: CFG,
+        sampler_name: "DPM++ 2M",
+        scheduler: "Karras",
+      }),
+    });
+    if (!res.ok) throw new Error(`error ${res.status}`);
+    const image = (await res.json()).images?.[0];
+    if (!image) throw new Error("no image returned");
+    const edited = { id: uid(), prompt: `${editing.prompt} (edited: ${change})`, src: await toJpeg(image), created: Date.now() };
+    saved ??= (await loadExtra("images")) ?? [];
+    saved.unshift(edited);
+    saved.splice(MAX_SAVED);
+    persistImages();
+    renderGallery();
+    // Keep going from the result: paint again to change something else.
+    editing = edited;
+    pic.src = edited.src;
+    $("edit-mask").getContext("2d").clearRect(0, 0, pic.naturalWidth, pic.naturalHeight);
+    status.textContent = "Done. It's saved in your pictures. Paint again to change something else.";
+  } catch (e) {
+    const r = await checkImages(base());
+    status.className = "error";
+    status.textContent = r.ok ? `The edit couldn't be made (${e.message}).` : r.message;
+  } finally {
+    clearInterval(poll);
+    busy = false;
+    $("edit-apply").disabled = false;
+  }
+}
+
+// ---------- Reference library ----------
+
+function renderRefs() {
+  for (const kind of Object.keys(REF_KINDS)) {
+    const mine = (refs ?? []).filter((r) => r.kind === kind);
+    const pick = $(`ref-pick-${kind}`);
+    const keep = pick.value;
+    pick.replaceChildren(new Option("None", ""), ...mine.map((r) => new Option(r.name, r.id)));
+    pick.value = mine.some((r) => r.id === keep) ? keep : "";
+    pick.closest("label").hidden = !mine.length;
+    const list = $(`ref-list-${kind}`);
+    list.replaceChildren(...mine.map((r) => {
+      const card = document.createElement("div");
+      card.className = "ref-card";
+      const img = document.createElement("img");
+      img.src = r.src;
+      img.alt = "";
+      const name = document.createElement("input");
+      name.value = r.name;
+      name.setAttribute("aria-label", "Name");
+      name.addEventListener("change", () => {
+        r.name = name.value.trim() || r.name;
+        persistRefs();
+        renderRefs();
+      });
+      const del = document.createElement("button");
+      del.type = "button";
+      del.className = "link";
+      del.textContent = "Delete";
+      del.addEventListener("click", () => {
+        refs = refs.filter((x) => x !== r);
+        persistRefs();
+        renderRefs();
+      });
+      card.append(img, name, del);
+      return card;
+    }));
+  }
+  $("ref-pickers").hidden = !(refs ?? []).length;
+}
+
+async function addRefs(kind, files) {
+  refs ??= (await loadExtra("refs")) ?? [];
+  let added = 0;
+  for (const file of files) {
+    const url = URL.createObjectURL(file);
+    try {
+      const name = file.name.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").trim().slice(0, 40) || `${REF_KINDS[kind]} ${refs.length + 1}`;
+      if (MINOR_TERMS.test(name)) continue;
+      refs.push({ id: uid(), kind, name, src: await shrink(url) });
+      added++;
+    } catch {
+      // not a picture; skip it
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+  persistRefs();
+  renderRefs();
+  if (added < files.length) alert(`${files.length - added} of those files couldn't be added.`);
 }
 
 // ---------- Characters ----------

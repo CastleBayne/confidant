@@ -101,7 +101,7 @@ export async function save(obj) {
 
 // Large things (pictures) live in their own records so saving a chat
 // doesn't rewrite them. They're encrypted the same way as the main record.
-const EXTRAS = ["images", "characters"];
+const EXTRAS = ["images", "characters", "refs"];
 
 export async function loadExtra(name) {
   const meta = await get("meta");

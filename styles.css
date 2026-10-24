@@ -342,3 +342,21 @@ dialog.viewer::backdrop { background: rgba(0, 0, 0, 0.7); }
 
 .msg .via { display: block; margin: 2px 4px 0; font-size: 0.75rem; color: var(--muted, #888); }
 .char-card img.no-ref { background: var(--muted); opacity: 0.3; }
+
+.ref-group { margin: 6px 0; }
+.ref-group summary { cursor: pointer; font-weight: 600; padding: 4px 0; }
+.ref-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; margin: 8px 0; }
+.ref-card { display: flex; flex-direction: column; gap: 4px; }
+.ref-card img { width: 100%; aspect-ratio: 3 / 4; object-fit: cover; border-radius: 8px; }
+.ref-card input { font-size: 0.8rem; padding: 4px 6px; min-width: 0; }
+.ref-pickers { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; margin: 8px 0; }
+
+.edit-stage { position: relative; width: 100%; touch-action: none; user-select: none; }
+.edit-stage img { width: 100%; display: block; border-radius: 10px; }
+.edit-stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0.5; cursor: crosshair; border-radius: 10px; }
+.edit-tools { align-items: center; }
+.edit-brush { flex: 1; min-width: 140px; }
+#edit-erase[aria-pressed="true"] { outline: 2px solid var(--accent, #c9a0ff); }
+#img-editor label { display: block; margin: 8px 0; }
+#img-editor textarea, #img-editor select { display: block; width: 100%; margin-top: 4px; box-sizing: border-box; }
+#img-editor .edit-brush input { display: block; width: 100%; }
