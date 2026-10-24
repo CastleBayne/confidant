@@ -1,0 +1,15 @@
+# One-off lookup: how Forge applies --cors-allow-origins.
+name: Forge CORS
+on:
+  push:
+    branches: [gh-pages]
+    paths: [".github/workflows/find-models.yml"]
+jobs:
+  find:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          git clone --depth 1 https://github.com/lllyasviel/stable-diffusion-webui-forge forge && cd forge
+          grep -rn "cors" --include=*.py . | grep -v "^./extensions-builtin/forge_space" | head -30
+          echo "=== setup_middleware"; grep -rn "def setup_middleware" -A25 --include=*.py modules | head -40
+          echo "=== callers"; grep -rn "setup_middleware\|add_middleware" --include=*.py . | head
