@@ -27,20 +27,39 @@ function recall(key) {
 
 export const isGgufDownloaded = (model) => recall(DONE_KEY + model.id) === "1";
 
-// Finds the .gguf file in a Hugging Face repo (names vary by uploader).
+async function hfJson(path) {
+  const res = await fetch(`https://huggingface.co/api/${path}`);
+  return res.ok ? res.json() : null;
+}
+
+// The Q4_K_M .gguf in a public repo, or null if the repo is missing or gated.
+async function q4File(repo) {
+  const info = await hfJson(`models/${repo}`);
+  if (!info || info.gated || info.private) return null;
+  const files = (info.siblings ?? []).map((s) => s.rfilename).filter((f) => f.endsWith(".gguf"));
+  return files.find((f) => /q4_k_m/i.test(f)) ?? null;
+}
+
+// Uploads on Hugging Face get renamed, gated or removed, so try the known
+// repos first, then fall back to searching for the most-downloaded match.
 async function resolveFile(model) {
-  const known = recall(FILE_KEY + model.repo);
+  const known = recall(FILE_KEY + model.id);
   if (known) return known;
-  let file = model.file;
-  if (!file) {
-    const res = await fetch(`https://huggingface.co/api/models/${model.repo}`);
-    if (!res.ok) throw new Error(`Couldn't find ${model.repo} on Hugging Face (${res.status}).`);
-    const ggufs = (await res.json()).siblings.map((s) => s.rfilename).filter((f) => f.endsWith(".gguf"));
-    file = ggufs.find((f) => /q4_k_m/i.test(f)) ?? ggufs[0];
-    if (!file) throw new Error(`${model.repo} has no .gguf file.`);
+  const tried = new Set();
+  const tryRepo = async (repo) => {
+    if (tried.has(repo)) return null;
+    tried.add(repo);
+    const file = await q4File(repo);
+    return file ? `https://huggingface.co/${repo}/resolve/main/${file}` : null;
+  };
+  let url = null;
+  for (const repo of model.repos) if ((url = await tryRepo(repo))) break;
+  if (!url) {
+    const found = await hfJson(`models?search=${encodeURIComponent(model.search)}&filter=gguf&sort=downloads&direction=-1&limit=15`);
+    for (const m of found ?? []) if ((url = await tryRepo(m.id))) break;
   }
-  const url = `https://huggingface.co/${model.repo}/resolve/main/${file}`;
-  remember(FILE_KEY + model.repo, url);
+  if (!url) throw new Error(`Couldn't find a downloadable copy of ${model.name} on Hugging Face. Check your internet connection and try again.`);
+  remember(FILE_KEY + model.id, url);
   return url;
 }
 

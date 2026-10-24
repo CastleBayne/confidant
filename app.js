@@ -237,9 +237,10 @@ async function loadModel() {
     loadingId = null;
     await unloadEngine();
     setStatus("Couldn't load model");
-    alert(
-      "The model couldn't start. This usually means the phone ran out of memory.\n\n" +
-      "Close other apps and try again, or pick a smaller model in Settings.\n\n" + (e?.message ?? e));
+    const msg = String(e?.message ?? e);
+    alert(/Hugging Face|fetch|network|download/i.test(msg)
+      ? `The model couldn't be downloaded.\n\n${msg}`
+      : `The model couldn't start. This usually means the phone ran out of memory.\n\nClose other apps and try again, or pick a smaller model in Settings.\n\n${msg}`);
     $("first-run").hidden = false;
   } finally {
     $("loader").hidden = true;

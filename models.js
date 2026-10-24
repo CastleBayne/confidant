@@ -9,19 +9,40 @@ export const MODELS = [
   {
     id: "gguf:llama-3.2-1b-abliterated",
     engine: "gguf",
-    repo: "Triangle104/Llama-3.2-1B-Instruct-abliterated-Q4_K_M-GGUF",
+    // Verified public on Hugging Face; the app searches if all of these vanish.
+    repos: [
+      "mradermacher/Llama-3.2-1B-Instruct-abliterated-GGUF",
+      "RichardErkhov/huihui-ai_-_Llama-3.2-1B-Instruct-abliterated-gguf",
+      "ElectricLMA/Abliterated-Llama-3.2-1B-Instruct-Q4_K_M-GGUF",
+    ],
+    search: "Llama-3.2-1B-Instruct-abliterated",
     name: "Uncensored Llama 3.2 (1B)",
     size: "≈0.8 GB download",
     note: "No refusals: handles explicit scenes. Light and safe for iPhone, but writing is simpler.",
     ctx: 4096,
   },
   {
+    id: "gguf:hermes-3-3b-abliterated",
+    engine: "gguf",
+    repos: ["mradermacher/Hermes-3-Llama-3.2-3B-abliterated-GGUF"],
+    search: "Hermes-3-Llama-3.2-3B-abliterated",
+    name: "Uncensored Hermes 3 (3B)",
+    size: "≈2 GB download",
+    note: "Hermes 3 with refusals removed: the best writer here. Slower, and may be too big for Safari. Try after the 1B works.",
+    ctx: 2048,
+  },
+  {
     id: "gguf:llama-3.2-3b-abliterated",
     engine: "gguf",
-    repo: "Triangle104/Llama-3.2-3B-Instruct-abliterated-Q4_K_M-GGUF",
+    repos: [
+      "QuantFactory/Llama-3.2-3B-Instruct-abliterated-GGUF",
+      "mradermacher/Llama-3.2-3B-Instruct-abliterated-GGUF",
+      "MaziyarPanahi/Llama-3.2-3B-Instruct-abliterated-GGUF",
+    ],
+    search: "Llama-3.2-3B-Instruct-abliterated",
     name: "Uncensored Llama 3.2 (3B)",
     size: "≈2 GB download",
-    note: "No refusals and better writing, but slower and may be too big for Safari. Try the 1B first.",
+    note: "No refusals, better writing than the 1B. Slower, and may be too big for Safari.",
     ctx: 2048,
   },
   {
