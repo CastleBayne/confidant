@@ -8,24 +8,12 @@ jobs:
   find:
     runs-on: ubuntu-latest
     steps:
-      - shell: python
-        run: |
-          import json, urllib.request
-          def get(url):
-              try:
-                  with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "x"}), timeout=30) as r: return json.load(r)
-              except Exception as e: return {"error": str(e)}
-          for repo in ["h94/IP-Adapter", "h94/IP-Adapter-FaceID", "lllyasviel/Annotators"]:
-              info = get(f"https://huggingface.co/api/models/{repo}?blobs=true")
-              print(f"\n=== {repo} gated={info.get('gated')} {info.get('error','')}")
-              for s in info.get("siblings", []):
-                  f = s["rfilename"]
-                  if any(k in f.lower() for k in ["sd15", "image_encoder", "clip_h", "clip_vision", "ip-adapter", "ipadapter"]) and f.endswith((".safetensors", ".bin", ".pth")):
-                      print(f, round((s.get("size") or 0) / 1e6), "MB")
       - run: |
           git clone --depth 1 https://github.com/lllyasviel/stable-diffusion-webui-forge forge
           cd forge
           echo "=== commit"; git log -1 --format='%H %cd'
+          echo "=== ControlNetUnit"; f=$(grep -rln "class ControlNetUnit" extensions-builtin/sd_forge_controlnet); echo $f; for x in $f; do awk '/class ControlNetUnit/{p=1} p{print; n++} n>140{exit}' $x; done
+          echo "=== from_dict / parse"; grep -rn "def from_dict\|def to_base64_nparray\|def get_single_image\|image\\b.*Union\|mask_image" extensions-builtin/sd_forge_controlnet/lib_controlnet/external_code.py | head -20
           echo "=== ipadapter preprocessor names"; grep -rn "IPAdapter\|ipadapter" --include=*.py extensions-builtin | grep -i "name\|add_supported_preprocessor\|preprocessor_name\|tags" | head -40
           echo "=== controlnet api routes"; grep -rn "controlnet/\|module_list\|model_list" --include=*.py extensions-builtin modules | head -20
           echo "=== clip vision download urls"; grep -rn "huggingface.co" --include=*.py extensions-builtin | grep -i "clip\|ipadapter\|insight" | head -20
