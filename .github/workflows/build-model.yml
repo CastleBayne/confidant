@@ -17,7 +17,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
-      SOURCE: huihui-ai/Llama-3.2-1B-Instruct-abliterated
       OUT: models/Llama-3.2-1B-Instruct-abliterated-q4f16_1-MLC/resolve/main
     steps:
       - uses: actions/checkout@v4
@@ -31,10 +30,38 @@ jobs:
       - name: Install MLC LLM
         run: pip install --pre -U -f https://mlc.ai/wheels mlc-llm-nightly-cpu mlc-ai-nightly-cpu huggingface_hub
 
+      # Some uploads get gated or removed, so try known copies, then search.
       - name: Download source model
+        shell: python
         run: |
-          python -c "from huggingface_hub import snapshot_download; snapshot_download('$SOURCE', local_dir='src', allow_patterns=['*.json', '*.safetensors', 'tokenizer*'])"
-          ls -la src
+          from huggingface_hub import HfApi, snapshot_download
+          api = HfApi()
+          candidates = [
+              "huihui-ai/Llama-3.2-1B-Instruct-abliterated",
+              "KidIkaros/Llama-3.2-1B-Instruct-abliterated",
+              "mylesgoose/Llama-3.2-1B-Instruct-abliterated3",
+              "mylesgoose/Llama-3.2-1B-Instruct-abliterated2",
+          ]
+          try:
+              for m in api.list_models(search="Llama-3.2-1B-Instruct-abliterated", sort="downloads", limit=30):
+                  if "gguf" not in m.id.lower() and m.id not in candidates:
+                      candidates.append(m.id)
+          except Exception as e:
+              print("search failed:", e)
+          for repo in candidates:
+              try:
+                  files = api.list_repo_files(repo)
+                  if not any(f.endswith(".safetensors") for f in files):
+                      print("skip (no safetensors):", repo)
+                      continue
+                  snapshot_download(repo, local_dir="src", allow_patterns=["*.json", "*.safetensors", "tokenizer*"])
+                  print("USING", repo)
+                  open("source.txt", "w").write(repo)
+                  break
+              except Exception as e:
+                  print("skip", repo, type(e).__name__, str(e)[:120])
+          else:
+              raise SystemExit("No downloadable abliterated Llama 3.2 1B found")
 
       - name: Convert to MLC format
         run: |
@@ -53,5 +80,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add models
-          git commit -m "Add Llama 3.2 1B abliterated (q4f16_1, MLC)"
+          git commit -m "Add Llama 3.2 1B abliterated (q4f16_1, MLC) from $(cat source.txt)"
           git push
