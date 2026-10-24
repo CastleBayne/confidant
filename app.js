@@ -1,5 +1,5 @@
 import * as store from "./store.js";
-import { MODELS, DEFAULT_MODEL, resolveModelId } from "./models.js";
+import { MODELS, DEFAULT_MODEL, CUSTOM_CTX, resolveModelId } from "./models.js";
 import { freshWriting, initWriting, showWriting } from "./writing.js";
 import { stripDashes } from "./voice.js";
 
@@ -7,7 +7,8 @@ const DEFAULT_PERSONA = `You are {{name}}, my private companion. Our conversatio
 
 Talk with me openly and casually, like a close friend I trust. Be honest, warm and non-judgmental. Don't lecture me, moralize or add disclaimers, and don't shy away from personal, emotional or adult topics. Ask follow-up questions when it helps. Keep replies natural and fairly short unless I ask for more.`;
 
-const CONTEXT_TOKENS = 4096;
+const LOADING_KEY = "confidant-loading"; // set while a model starts; left behind if Safari crashes
+const SETTINGS_VERSION = 2;
 const REPLY_TOKENS = 700;
 const CHARS_PER_TOKEN = 3.5; // rough, errs on the side of trimming
 
@@ -29,6 +30,7 @@ function freshData() {
       persona: DEFAULT_PERSONA,
       temperature: 0.8,
       model: DEFAULT_MODEL,
+      version: SETTINGS_VERSION,
       customUrl: "",
       customLib: "",
       memoryOn: true,
@@ -62,6 +64,12 @@ async function openApp() {
   data = (await store.load()) ?? freshData();
   const base = freshData();
   data = { ...base, ...data, settings: { ...base.settings, ...data.settings }, writing: { ...base.writing, ...data.writing } };
+  // Version 1 defaulted to a 3B model that's too big for Safari on most iPhones.
+  if ((data.settings.version ?? 1) < 2) {
+    data.settings.model = DEFAULT_MODEL;
+    data.settings.version = SETTINGS_VERSION;
+    persist();
+  }
   $("lock").hidden = true;
 
   const gpu = await checkWebGPU();
@@ -97,9 +105,38 @@ async function checkWebGPU() {
 function modelConfig() {
   const s = data.settings;
   if (s.customUrl && s.customLib) {
-    return { id: "custom-model", custom: { model: s.customUrl, model_id: "custom-model", model_lib: s.customLib } };
+    return { id: "custom-model", ctx: CUSTOM_CTX, custom: { model: s.customUrl, model_id: "custom-model", model_lib: s.customLib } };
   }
-  return { id: resolveModelId(s.model, hasF16) };
+  return { id: resolveModelId(s.model, hasF16), ctx: MODELS.find((m) => m.id === s.model)?.ctx ?? 2048 };
+}
+
+const contextTokens = () => modelConfig().ctx;
+
+function readFlag() {
+  try { return localStorage.getItem(LOADING_KEY); } catch { return null; }
+}
+
+function writeFlag(v) {
+  try { v ? localStorage.setItem(LOADING_KEY, v) : localStorage.removeItem(LOADING_KEY); } catch {}
+}
+
+// If Safari crashed while a model was starting, don't start it again
+// automatically (that loops the crash). Step down to the smallest model.
+function recoverFromCrash() {
+  const crashed = readFlag();
+  if (!crashed) return false;
+  writeFlag(null);
+  const was = MODELS.find((m) => resolveModelId(m.id, true) === crashed || resolveModelId(m.id, false) === crashed);
+  const note = $("crash-note");
+  if (was && was.id !== DEFAULT_MODEL && data.settings.model === was.id) {
+    data.settings.model = DEFAULT_MODEL;
+    persist();
+    note.textContent = `${was.name} was too big for Safari on this phone and crashed it, so I switched to ${MODELS[0].name}. Tap the button below to try again.`;
+  } else {
+    note.textContent = "Last time, the model crashed Safari while starting. Close other apps, then tap the button below to try again.";
+  }
+  note.hidden = false;
+  return true;
 }
 
 async function webllm() {
@@ -115,13 +152,19 @@ async function appConfig(custom) {
 
 async function refreshFirstRun() {
   if (engine) return ($("first-run").hidden = true);
+  const crashed = recoverFromCrash();
   const { id, custom } = modelConfig();
   const { hasModelInCache } = await webllm();
   let cached = false;
   try { cached = await hasModelInCache(id, await appConfig(custom)); } catch {}
-  if (cached) {
+  if (cached && !crashed) {
     $("first-run").hidden = true;
     loadModel(); // already downloaded: just start it
+  } else if (cached) {
+    $("first-run-size").textContent = "";
+    $("load-model").textContent = "Start";
+    $("first-run").hidden = false;
+    setStatus("Model not started");
   } else {
     const info = MODELS.find((m) => m.id === data.settings.model);
     $("first-run-size").textContent = custom ? "your custom model" : info?.size.replace("download", "").trim() ?? "about 2 GB";
@@ -131,9 +174,10 @@ async function refreshFirstRun() {
 }
 
 async function loadModel() {
-  const { id, custom } = modelConfig();
+  const { id, custom, ctx } = modelConfig();
   if (engine && loadedModel === id) return;
   $("first-run").hidden = true;
+  $("crash-note").hidden = true;
   $("loader").hidden = false;
   setStatus("Loading…");
   const onProgress = (p) => {
@@ -145,14 +189,17 @@ async function loadModel() {
     await unloadEngine();
     const { CreateWebWorkerMLCEngine } = await webllm();
     worker = new Worker(new URL("./llm-worker.js", import.meta.url), { type: "module" });
+    writeFlag(id);
     engine = await CreateWebWorkerMLCEngine(worker, id, {
       initProgressCallback: onProgress,
       appConfig: await appConfig(custom),
-    });
+    }, { context_window_size: ctx });
+    writeFlag(null);
     loadedModel = id;
     setStatus("Private · on this phone");
   } catch (e) {
     console.error(e);
+    writeFlag(null);
     await unloadEngine();
     setStatus("Couldn't load model");
     alert(
@@ -196,7 +243,7 @@ function systemPrompt() {
 // Keep the newest messages that fit in the model's context window.
 function contextMessages(history) {
   const system = systemPrompt();
-  let budget = (CONTEXT_TOKENS - REPLY_TOKENS) * CHARS_PER_TOKEN - system.length;
+  let budget = (contextTokens() - REPLY_TOKENS) * CHARS_PER_TOKEN - system.length;
   const kept = [];
   for (let i = history.length - 1; i >= 0; i--) {
     budget -= history[i].content.length + 20;
@@ -622,6 +669,7 @@ initWriting({
   data: () => data,
   persist,
   engine: () => engine,
+  contextTokens,
   ensureEngine: async () => {
     if (!engine) await loadModel();
     return engine;

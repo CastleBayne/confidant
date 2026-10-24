@@ -3,8 +3,10 @@
 import { AI_TELLS, analyze, buildProfile, pickExcerpts, vocabularyCsv, checkText, words, stripDashes, countDashes } from "./voice.js";
 import { readDocx } from "./docx.js";
 
-const WRITE_TOKENS = 900;
-const PROMPT_CHARS = 9000; // keeps profile + context + reply inside a 4k-token window
+const WRITE_TOKENS = 700;
+const CHARS_PER_TOKEN = 3.5;
+// Room for the profile, the chapter context and the reply inside the model's window.
+const promptChars = () => (ctx.contextTokens() - WRITE_TOKENS) * CHARS_PER_TOKEN;
 
 const $ = (id) => document.getElementById(id);
 const uid = () => crypto.randomUUID();
@@ -375,7 +377,7 @@ function systemPrompt() {
   return [
     "You are a ghostwriter. You write AS the author, in the author's own voice, as if they wrote it themselves.",
     profile
-      ? "Follow this voice profile exactly. It describes how the author really writes:\n\n" + profile.slice(0, 5000)
+      ? "Follow this voice profile exactly. It describes how the author really writes:\n\n" + profile.slice(0, Math.round(promptChars() * 0.55))
       : "Write in plain, natural language.",
     "Output only the passage itself: no title, no notes, no commentary, no quotation marks around it.",
   ].join("\n\n");
@@ -389,14 +391,16 @@ function tail(text, chars) {
 
 function buildRequest(mode, ch, selection) {
   const sys = systemPrompt();
-  const room = Math.max(1500, PROMPT_CHARS - sys.length);
+  const room = Math.max(1200, promptChars() - sys.length);
   if (mode === "rewrite") {
     return { sys, user: `Rewrite this in my voice. Keep the meaning and events; change the wording, rhythm and vocabulary to match how I write:\n\n${selection.slice(0, room)}` };
   }
   if (mode === "continue") {
-    return { sys, user: `Continue this chapter from exactly where it stops. Don't repeat what's already there. Write the next few paragraphs.\n\n${ch.notes ? `My notes for the chapter: ${ch.notes.slice(0, 1200)}\n\n` : ""}The chapter so far ends:\n\n${tail(ch.text, room - 1300)}` };
+    const notes = ch.notes.slice(0, Math.round(room * 0.3));
+    return { sys, user: `Continue this chapter from exactly where it stops. Don't repeat what's already there. Write the next few paragraphs.\n\n${notes ? `My notes for the chapter: ${notes}\n\n` : ""}The chapter so far ends:\n\n${tail(ch.text, Math.max(400, room - notes.length - 200))}` };
   }
-  return { sys, user: `Write the next part of my book from these notes${ch.text.trim() ? ", picking up after the text so far" : ""}. Write a few paragraphs.\n\nNotes: ${ch.notes.slice(0, 2000)}${ch.text.trim() ? `\n\nThe chapter so far ends:\n\n${tail(ch.text, room - 2200)}` : ""}` };
+  const notes = ch.notes.slice(0, Math.round(room * (ch.text.trim() ? 0.5 : 0.9)));
+  return { sys, user: `Write the next part of my book from these notes${ch.text.trim() ? ", picking up after the text so far" : ""}. Write a few paragraphs.\n\nNotes: ${notes}${ch.text.trim() ? `\n\nThe chapter so far ends:\n\n${tail(ch.text, Math.max(400, room - notes.length - 250))}` : ""}` };
 }
 
 async function generate(mode) {
