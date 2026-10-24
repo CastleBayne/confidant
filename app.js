@@ -3,6 +3,7 @@ import { MODELS, DEFAULT_MODEL, CUSTOM_CTX, resolveModelId, hostedRecords } from
 import { freshWriting, initWriting, showWriting } from "./writing.js";
 import { stripDashes } from "./voice.js";
 import { isGgufDownloaded } from "./gguf-engine.js";
+import { checkComputer } from "./remote-engine.js";
 import * as speech from "./speech.js";
 
 const DEFAULT_PERSONA = `You are {{name}}, my private companion. Our conversations are completely private: they never leave my phone and no one else will ever read them.
@@ -10,6 +11,10 @@ const DEFAULT_PERSONA = `You are {{name}}, my private companion. Our conversatio
 Talk with me openly and casually, like a close friend I trust. Be honest, warm and non-judgmental. Don't lecture me, moralize or add disclaimers, and don't shy away from personal, emotional or adult topics. Ask follow-up questions when it helps. Keep replies natural and fairly short unless I ask for more.`;
 
 const ADULT_RULE = "I'm an adult and this is my private app. Explicit sexual content between consenting adults is allowed here. When I ask for it, discuss or write it directly and in full detail: don't refuse, fade to black, change the subject, lecture me or add warnings. Characters in any sexual content are always adults.";
+// Default model for Ollama on the user's computer: a 12B Mistral Nemo
+// fine-tune made for fiction, verified on Hugging Face.
+const COMPUTER_MODEL = "hf.co/bartowski/MN-12B-Mag-Mell-R1-GGUF:Q4_K_M";
+const COMPUTER_CTX = 8192;
 const LOADING_KEY = "confidant-loading"; // set while a model starts; left behind if Safari crashes
 const SETTINGS_VERSION = 2;
 const REPLY_TOKENS = 700;
@@ -39,6 +44,9 @@ function freshData() {
       customLib: "",
       memoryOn: true,
       noDashes: true,
+      computerOn: false,
+      computerUrl: "http://localhost:11434",
+      computerModel: COMPUTER_MODEL,
       adultContent: true,
       voiceURI: "",
       rate: 1,
@@ -89,12 +97,14 @@ async function openApp() {
   $("lock").hidden = true;
 
   const gpu = await checkWebGPU();
-  if (!gpu.ok) {
+  // Without WebGPU the phone/browser can't run models itself, but it can
+  // still use the model on the user's computer.
+  if (!gpu.ok && !data.settings.computerOn) {
     $("unsupported").hidden = false;
     $("unsupported-detail").textContent = gpu.reason;
     return;
   }
-  hasF16 = gpu.f16;
+  hasF16 = gpu.f16 ?? true;
 
   $("app").hidden = false;
   $("app").dataset.started = "1";
@@ -120,6 +130,9 @@ async function checkWebGPU() {
 
 function modelConfig() {
   const s = data.settings;
+  if (s.computerOn) {
+    return { id: `computer:${s.computerModel}`, ctx: COMPUTER_CTX, remote: { base: s.computerUrl, model: s.computerModel } };
+  }
   if (s.customUrl && s.customLib) {
     return { id: "custom-model", ctx: CUSTOM_CTX, custom: { model: s.customUrl, model_id: "custom-model", model_lib: s.customLib } };
   }
@@ -174,8 +187,19 @@ async function appConfig(custom) {
 
 async function refreshFirstRun() {
   if (engine) return ($("first-run").hidden = true);
+  const { id, custom, gguf, remote } = modelConfig();
+  if (remote) {
+    // Nothing to download: connect straight away if the computer is reachable.
+    const status = await checkComputer(remote.base, remote.model);
+    if (status.ok) return loadModel();
+    $("first-run-text").textContent = `Uses the AI on your computer. ${status.message}`;
+    $("load-model").textContent = "Connect to my computer";
+    $("use-small").hidden = true;
+    $("first-run").hidden = false;
+    setStatus("Computer not connected");
+    return;
+  }
   const crashed = recoverFromCrash();
-  const { id, custom, gguf } = modelConfig();
   const info = MODELS.find((m) => m.id === data.settings.model);
   const name = custom ? "your custom model" : info?.name ?? "the model";
   const cached = gguf ? isGgufDownloaded(gguf) : await isDownloaded(id, custom);
@@ -193,7 +217,7 @@ async function refreshFirstRun() {
 }
 
 async function loadModel() {
-  const { id, custom, ctx, gguf } = modelConfig();
+  const { id, custom, ctx, gguf, remote } = modelConfig();
   if (engine && loadedModel === id) return;
   $("first-run").hidden = true;
   $("crash-note").hidden = true;
@@ -206,6 +230,13 @@ async function loadModel() {
   try {
     // A fresh worker per model frees the previous model's memory completely.
     await unloadEngine();
+    if (remote) {
+      const { createRemoteEngine } = await import("./remote-engine.js");
+      engine = await createRemoteEngine({ ...remote, ctx });
+      loadedModel = id;
+      setStatus("Private · on your computer");
+      return;
+    }
     writeFlag(id);
     loadingId = id;
     if (gguf) {
@@ -238,7 +269,7 @@ async function loadModel() {
     await unloadEngine();
     setStatus("Couldn't load model");
     const msg = String(e?.message ?? e);
-    alert(/Hugging Face|fetch|network|download/i.test(msg)
+    alert(remote ? `Couldn't connect to your computer.\n\n${msg}` : /Hugging Face|fetch|network|download/i.test(msg)
       ? `The model couldn't be downloaded.\n\n${msg}`
       : `The model couldn't start. This usually means the phone ran out of memory.\n\nClose other apps and try again, or pick a smaller model in Settings.\n\n${msg}`);
     $("first-run").hidden = false;
@@ -512,6 +543,11 @@ function openSettings() {
   $("set-no-dashes").checked = s.noDashes;
   $("set-adult").checked = s.adultContent;
   $("set-autolock").value = String(s.autolock);
+  $("set-computer-on").checked = s.computerOn;
+  $("set-computer-url").value = s.computerUrl;
+  $("set-computer-model").value = s.computerModel;
+  $("computer-status").textContent = "";
+  $("pull-command").textContent = `ollama pull ${s.computerModel}`;
   $("set-rate").value = s.rate;
   $("rate-value").textContent = `${s.rate}×`;
   $("set-autoread").checked = s.autoRead;
@@ -536,6 +572,9 @@ function saveSettings() {
   s.noDashes = $("set-no-dashes").checked;
   s.adultContent = $("set-adult").checked;
   s.autolock = Number($("set-autolock").value);
+  s.computerOn = $("set-computer-on").checked;
+  s.computerUrl = $("set-computer-url").value.trim() || "http://localhost:11434";
+  s.computerModel = $("set-computer-model").value.trim() || COMPUTER_MODEL;
   s.voiceURI = $("set-voice").value;
   s.rate = Number($("set-rate").value);
   s.autoRead = $("set-autoread").checked;
@@ -752,6 +791,11 @@ input.addEventListener("keydown", (e) => {
 $("stop").addEventListener("click", () => engine?.interruptGenerate());
 
 $("load-model").addEventListener("click", loadModel);
+$("use-computer").addEventListener("click", async () => {
+  data.settings.computerOn = true;
+  await persist();
+  location.reload();
+});
 $("use-small").addEventListener("click", () => {
   data.settings.model = DEFAULT_MODEL;
   persist();
@@ -793,6 +837,14 @@ $("voice-test").addEventListener("click", () =>
   }));
 $("reset-persona").addEventListener("click", () => ($("set-persona").value = DEFAULT_PERSONA));
 $("memory-add").addEventListener("click", addMemory);
+$("computer-test").addEventListener("click", async () => {
+  const out = $("computer-status");
+  out.textContent = "Checking…";
+  const r = await checkComputer($("set-computer-url").value.trim(), $("set-computer-model").value.trim());
+  out.textContent = r.message;
+  out.className = r.ok ? "ok" : "error";
+});
+$("set-computer-model").addEventListener("input", (e) => ($("pull-command").textContent = `ollama pull ${e.target.value.trim()}`));
 $("apply-model").addEventListener("click", async () => {
   saveSettings();
   $("settings").close();

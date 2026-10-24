@@ -318,3 +318,7 @@ dialog.sheet::backdrop { background: rgba(0, 0, 0, 0.5); }
 }
 .version { font-size: 13px; text-align: center; margin-top: 24px; }
 .btn-row.center { justify-content: center; }
+#computer-status.ok { color: #4caf7a; }
+.card.computer { display: grid; gap: 8px; margin-top: 0; }
+.card.computer label { margin-top: 0; }
+.card.computer code { word-break: break-all; }

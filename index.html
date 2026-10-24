@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self' https://huggingface.co https://*.huggingface.co https://*.hf.co https://raw.githubusercontent.com; img-src 'self' data: blob:; style-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self' http://localhost:* http://127.0.0.1:* https://huggingface.co https://*.huggingface.co https://*.hf.co https://raw.githubusercontent.com; img-src 'self' data: blob:; style-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
   <meta name="referrer" content="no-referrer">
   <meta name="robots" content="noindex, nofollow">
   <meta name="theme-color" content="#14111c">
@@ -44,6 +44,8 @@
         <li>If it still fails, check <em>Settings → Apps → Safari → Advanced → Feature Flags</em> and turn on <strong>WebGPU</strong>.</li>
       </ol>
       <p id="unsupported-detail" class="muted"></p>
+      <p>Or use the AI on your computer instead:</p>
+      <button id="use-computer" class="primary">Use my computer's AI</button>
     </div>
   </section>
 
@@ -287,6 +289,31 @@
       <button type="button" id="voice-test" class="secondary">Test voice</button>
 
       <h3>Model</h3>
+      <div class="card computer">
+        <label class="row">
+          <span>Use the AI on my computer</span>
+          <input id="set-computer-on" type="checkbox" class="switch">
+        </label>
+        <small>Runs a much bigger, uncensored model in Ollama on your laptop, so the writing is far better. When this is on, the phone models below aren't used.</small>
+        <details class="advanced">
+          <summary>One-time setup on the computer</summary>
+          <ol class="steps">
+            <li>Install <strong>Ollama</strong> from <strong>ollama.com</strong> (free).</li>
+            <li>Open <strong>PowerShell</strong> and run:<br><code>setx OLLAMA_ORIGINS "https://castlebayne.github.io"</code><br>This lets Confidant talk to Ollama.</li>
+            <li>Quit Ollama (right-click its llama icon near the clock → Quit) and open it again.</li>
+            <li>In PowerShell, download the model (about 7.5 GB):<br><code id="pull-command"></code></li>
+            <li>Turn on the switch above and tap <strong>Test connection</strong>. If the browser asks to access devices on your network, tap <strong>Allow</strong>.</li>
+          </ol>
+        </details>
+        <label>Computer address
+          <input id="set-computer-url" type="url" autocomplete="off">
+        </label>
+        <label>Model name in Ollama
+          <input id="set-computer-model" type="text" autocomplete="off" autocapitalize="off" spellcheck="false">
+        </label>
+        <button type="button" id="computer-test" class="secondary">Test connection</button>
+        <p id="computer-status" aria-live="polite"></p>
+      </div>
       <div id="model-list" class="model-list"></div>
       <details class="advanced">
         <summary>Use your own model (advanced)</summary>
@@ -341,7 +368,7 @@
         <button type="button" id="delete-models" class="secondary">Delete downloaded models</button>
         <button type="button" id="erase-all" class="danger">Erase everything</button>
       </div>
-      <p class="muted version">Confidant version 13</p>
+      <p class="muted version">Confidant version 14</p>
     </form>
   </dialog>
 
