@@ -28,6 +28,19 @@ export const AI_TELLS = [
 ];
 
 const CONTRACTION = /\b\w+'(s|t|re|ve|ll|d|m)\b/gi;
+const DASH = /\s*(?:—|–|--)\s*/g;
+
+// Swap em/en dashes for commas, since the user never wants them.
+export function stripDashes(text) {
+  return text
+    .replace(DASH, ", ")
+    .replace(/,\s*([.!?,;:])/g, "$1")
+    .replace(/^,\s*/gm, "");
+}
+
+export function countDashes(text) {
+  return (text.match(/—|–|--/g) ?? []).length;
+}
 
 export function words(text) {
   return text.toLowerCase().replace(/[’‘]/g, "'").match(/[a-z]+(?:['-][a-z]+)*/g) ?? [];
@@ -156,14 +169,14 @@ function describeRate(rate, { often, some }) {
 }
 
 // A plain-text profile the user can read, edit, and paste into any AI.
-export function buildProfile(stats, { authorName, starred = [], hidden = [], excerpts = [] } = {}) {
+export function buildProfile(stats, { authorName, starred = [], hidden = [], excerpts = [], noDashes = true } = {}) {
   const keep = (w) => !hidden.includes(w);
   const sigWords = [...new Set([...starred, ...stats.words.map(([w]) => w)])].filter(keep).slice(0, 40);
   const phrases = stats.phrases.map(([p]) => p).filter(keep).slice(0, 15);
   const openers = stats.openers.map(([o]) => `"${o[0].toUpperCase()}${o.slice(1)}…"`).slice(0, 8);
   const p = stats.punctuation;
   const habits = [
-    `em dashes ${describeRate(p["em dashes (—)"], { often: 4, some: 1 })}`,
+    noDashes ? "em dashes never" : `em dashes ${describeRate(p["em dashes (—)"], { often: 4, some: 1 })}`,
     `semicolons ${describeRate(p.semicolons, { often: 3, some: 0.8 })}`,
     `ellipses ${describeRate(p["ellipses (…)"], { often: 3, some: 0.8 })}`,
     `exclamation marks ${describeRate(p["exclamation marks"], { often: 4, some: 1 })}`,
@@ -174,7 +187,7 @@ export function buildProfile(stats, { authorName, starred = [], hidden = [], exc
   const avoidPhrases = AI_TELLS.filter((t) => !stats.aiTellsUsed.includes(t) && t.includes(" "));
 
   return [
-    `VOICE PROFILE${authorName ? ` — ${authorName}` : ""}`,
+    `VOICE PROFILE${authorName ? `: ${authorName}` : ""}`,
     `Based on ${stats.totalWords.toLocaleString()} words of my own writing.`,
     "",
     "RHYTHM",
@@ -205,7 +218,8 @@ export function buildProfile(stats, { authorName, starred = [], hidden = [], exc
     "- Write the way I write: my words, my rhythm, my punctuation. Plain words over fancy ones.",
     "- Don't tidy my style up, summarize, moralize, or end on a neat lesson.",
     "- Match my sentence lengths; don't make every sentence the same shape.",
-    ...(excerpts.length ? ["", "SAMPLES OF MY WRITING", ...excerpts.map((e) => `"""\n${e}\n"""`)] : []),
+    ...(noDashes ? ["- NEVER use em dashes (—) or en dashes (–). Use a comma, a period or parentheses instead."] : []),
+    ...(excerpts.length ? ["", "SAMPLES OF MY WRITING", ...excerpts.map((e) => `"""\n${noDashes ? stripDashes(e) : e}\n"""`)] : []),
   ].join("\n");
 }
 

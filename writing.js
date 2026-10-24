@@ -1,6 +1,6 @@
 // Writing studio: learn the user's voice from their own writing, then help
 // draft a book in that voice. All analysis and generation happen on-device.
-import { AI_TELLS, analyze, buildProfile, pickExcerpts, vocabularyCsv, checkText, words } from "./voice.js";
+import { AI_TELLS, analyze, buildProfile, pickExcerpts, vocabularyCsv, checkText, words, stripDashes, countDashes } from "./voice.js";
 import { readDocx } from "./docx.js";
 
 const WRITE_TOKENS = 900;
@@ -279,8 +279,11 @@ function generatedProfile() {
     starred: w.starred,
     hidden: w.hidden,
     excerpts: pickExcerpts(allSampleText(), s),
+    noDashes: noDashes(),
   });
 }
+
+const noDashes = () => ctx.data().settings.noDashes;
 
 // Changes flow into the profile unless the user has hand-edited it.
 function rebuildProfileIfUnedited() {
@@ -429,6 +432,7 @@ async function generate(mode) {
     });
     for await (const chunk of stream) {
       out += chunk.choices[0]?.delta?.content ?? "";
+      if (noDashes()) out = stripDashes(out);
       ch.text = before + joiner + out.trimStart() + after;
       area.value = ch.text;
       if (mode !== "rewrite") area.scrollTop = area.scrollHeight;
@@ -474,6 +478,8 @@ function runCheck() {
 
   const notes = [];
   if (r.ai.length) notes.push(`AI-sounding words: ${r.ai.join(", ")}`);
+  const dashes = countDashes(text);
+  if (dashes) notes.push(`${dashes} em dash${dashes === 1 ? "" : "es"} (shown in red).`);
   notes.push(`Sentences average ${r.stats.avgSentence} words (yours: ${mine.avgSentence}).`);
   notes.push(`Contractions: ${r.stats.contractions} per 1,000 words (yours: ${mine.contractions}).`);
   if (r.unfamiliar.length) notes.push(`${r.unfamiliar.length} words you haven't used in your writing.`);
@@ -488,9 +494,14 @@ function runCheck() {
   const unfamiliar = new Set(r.unfamiliar);
   const box = $("check-highlight");
   box.replaceChildren();
-  for (const part of text.split(/([A-Za-z’'-]+)/)) {
+  for (const part of text.split(/([A-Za-z’']+(?:-[A-Za-z’']+)*|—|–|--)/)) {
     const key = part.toLowerCase().replace(/’/g, "'");
-    if (ai.has(key) || unfamiliar.has(key)) {
+    if (/^(—|–|--)$/.test(part)) {
+      const span = document.createElement("span");
+      span.className = "flag-ai";
+      span.textContent = part;
+      box.append(span);
+    } else if (ai.has(key) || unfamiliar.has(key)) {
       const span = document.createElement("span");
       span.className = ai.has(key) ? "flag-ai" : "flag-new";
       span.textContent = part;

@@ -1,6 +1,7 @@
 import * as store from "./store.js";
 import { MODELS, DEFAULT_MODEL, resolveModelId } from "./models.js";
 import { freshWriting, initWriting, showWriting } from "./writing.js";
+import { stripDashes } from "./voice.js";
 
 const DEFAULT_PERSONA = `You are {{name}}, my private companion. Our conversations are completely private: they never leave my phone and no one else will ever read them.
 
@@ -31,6 +32,7 @@ function freshData() {
       customUrl: "",
       customLib: "",
       memoryOn: true,
+      noDashes: true,
       autolock: 60,
     },
     memory: [],
@@ -184,6 +186,7 @@ function systemPrompt() {
   const s = data.settings;
   let p = s.persona.replaceAll("{{name}}", s.name || "Confidant");
   if (s.userName) p += `\n\nMy name is ${s.userName}.`;
+  if (s.noDashes) p += "\n\nNever use em dashes (—) or en dashes (–). Use commas or periods instead.";
   if (s.memoryOn && data.memory.length) {
     p += "\n\nThings you know about me:\n" + data.memory.map((m) => `- ${m.text}`).join("\n");
   }
@@ -235,6 +238,7 @@ async function send(text) {
     });
     for await (const chunk of stream) {
       reply.content += chunk.choices[0]?.delta?.content ?? "";
+      if (data.settings.noDashes) reply.content = stripDashes(reply.content);
       bubble.innerHTML = format(reply.content);
       scrollToBottom();
     }
@@ -399,6 +403,7 @@ function openSettings() {
   $("set-custom-url").value = s.customUrl;
   $("set-custom-lib").value = s.customLib;
   $("set-memory-on").checked = s.memoryOn;
+  $("set-no-dashes").checked = s.noDashes;
   $("set-autolock").value = String(s.autolock);
   renderModelList();
   renderMemory();
@@ -417,6 +422,7 @@ function saveSettings() {
   s.customUrl = $("set-custom-url").value.trim();
   s.customLib = $("set-custom-lib").value.trim();
   s.memoryOn = $("set-memory-on").checked;
+  s.noDashes = $("set-no-dashes").checked;
   s.autolock = Number($("set-autolock").value);
   const picked = document.querySelector('input[name="model"]:checked');
   if (picked) s.model = picked.value;
