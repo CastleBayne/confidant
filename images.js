@@ -125,12 +125,16 @@ export async function renderImages() {
 
 export async function checkImages(url) {
   try {
-    const res = await fetch(`${url}/sdapi/v1/sd-models`, { signal: AbortSignal.timeout(5000) });
+    // Forge answers slowly while it's still loading a model, so allow a minute.
+    const res = await fetch(`${url}/sdapi/v1/sd-models`, { signal: AbortSignal.timeout(60000) });
     if (!res.ok) return { ok: false, message: `The image program answered with an error (${res.status}). Make sure it was started with --api.` };
     const models = await res.json();
     if (!models.length) return { ok: false, message: "Connected, but no image model is installed yet. Put a model file in Forge's models\\Stable-diffusion folder and restart Forge." };
     return { ok: true, message: `Connected. ${models.length} image model${models.length === 1 ? "" : "s"} installed.` };
-  } catch {
+  } catch (e) {
+    if (e?.name === "TimeoutError") {
+      return { ok: false, message: "Forge is running but didn't answer within a minute. It's probably still loading the image model: wait until its black window goes quiet, then try again." };
+    }
     let answers = false;
     try {
       await fetch(url, { mode: "no-cors", signal: AbortSignal.timeout(5000) });
