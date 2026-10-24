@@ -1,6 +1,6 @@
 // Caches the app itself so it opens with no internet connection.
 // Model files are cached separately by WebLLM and aren't touched here.
-const CACHE = "confidant-app-v1";
+const CACHE = "confidant-app-v2";
 const SHELL = [
   "./",
   "index.html",
@@ -8,6 +8,9 @@ const SHELL = [
   "app.js",
   "store.js",
   "models.js",
+  "voice.js",
+  "writing.js",
+  "docx.js",
   "llm-worker.js",
   "vendor/web-llm/index.js",
   "manifest.webmanifest",

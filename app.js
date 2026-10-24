@@ -1,5 +1,6 @@
 import * as store from "./store.js";
 import { MODELS, DEFAULT_MODEL, resolveModelId } from "./models.js";
+import { freshWriting, initWriting, showWriting } from "./writing.js";
 
 const DEFAULT_PERSONA = `You are {{name}}, my private companion. Our conversations are completely private: they never leave my phone and no one else will ever read them.
 
@@ -33,6 +34,7 @@ function freshData() {
       autolock: 60,
     },
     memory: [],
+    writing: freshWriting(),
     conversations: [],
     currentId: null,
   };
@@ -56,7 +58,8 @@ async function start() {
 
 async function openApp() {
   data = (await store.load()) ?? freshData();
-  data = { ...freshData(), ...data, settings: { ...freshData().settings, ...data.settings } };
+  const base = freshData();
+  data = { ...base, ...data, settings: { ...base.settings, ...data.settings }, writing: { ...base.writing, ...data.writing } };
   $("lock").hidden = true;
 
   const gpu = await checkWebGPU();
@@ -541,6 +544,9 @@ async function lockNow() {
   store.lock();
   data = null;
   $("messages").querySelectorAll(".msg").forEach((n) => n.remove());
+  showWriting(false);
+  document.querySelectorAll("#writing textarea, #writing input").forEach((el) => (el.value = ""));
+  $("check-highlight").replaceChildren();
   showLock();
 }
 
@@ -605,6 +611,17 @@ input.addEventListener("keydown", (e) => {
 $("stop").addEventListener("click", () => engine?.interruptGenerate());
 
 $("load-model").addEventListener("click", loadModel);
+$("toggle-writing").addEventListener("click", () => showWriting($("writing").hidden));
+initWriting({
+  data: () => data,
+  persist,
+  engine: () => engine,
+  ensureEngine: async () => {
+    if (!engine) await loadModel();
+    return engine;
+  },
+  setBusy: setGenerating,
+});
 $("new-chat").addEventListener("click", () => newChat());
 $("open-drawer").addEventListener("click", openDrawer);
 $("close-drawer").addEventListener("click", closeDrawer);
