@@ -515,7 +515,7 @@
         <button type="button" id="delete-models" class="secondary">Delete downloaded models</button>
         <button type="button" id="erase-all" class="danger">Erase everything</button>
       </div>
-      <p class="muted version">Confidant version 37</p>
+      <p class="muted version">Confidant version 38</p>
     </form>
   </dialog>
 
@@ -523,6 +523,14 @@
     <form method="dialog" class="viewer-inner">
       <img id="img-viewer-pic" alt="">
       <p id="img-viewer-prompt" class="muted"></p>
+      <div class="btn-row">
+        <button type="button" id="img-viewer-undress" class="secondary">Remove clothes</button>
+      </div>
+      <div id="img-viewer-outfit-row" class="btn-row" hidden>
+        <select id="img-viewer-outfit" aria-label="Outfit"></select>
+        <button type="button" id="img-viewer-outfit-go" class="secondary">Change outfit</button>
+      </div>
+      <p id="img-viewer-status" aria-live="polite"></p>
       <div class="btn-row">
         <button type="button" id="img-viewer-save" class="primary">Save</button>
         <button type="button" id="img-viewer-reuse" class="secondary">Use description</button>

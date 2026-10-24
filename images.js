@@ -482,9 +482,21 @@ function renderGallery() {
 }
 
 function openViewer(img) {
-  const dlg = $("img-viewer");
   $("img-viewer-pic").src = img.src;
   $("img-viewer-prompt").textContent = img.prompt;
+  $("img-viewer-status").textContent = "";
+  const outfits = (refs ?? []).filter((r) => r.kind === "outfit");
+  $("img-viewer-outfit").replaceChildren(new Option("Change outfit to…", ""), ...outfits.map((r) => new Option(r.name, r.id)));
+  $("img-viewer-outfit-row").hidden = !outfits.length;
+  bindViewer(img);
+  $("img-viewer").showModal();
+}
+
+// Points the viewer's buttons at a picture (it changes after a quick edit).
+function bindViewer(img) {
+  const dlg = $("img-viewer");
+  $("img-viewer-undress").onclick = () => quickEdit(img, "undress");
+  $("img-viewer-outfit-go").onclick = () => quickEdit(img, "outfit");
   $("img-viewer-character").onclick = () => {
     dlg.close();
     openCharEditor(null, img.src);
@@ -515,7 +527,6 @@ function openViewer(img) {
     dlg.close();
     renderGallery();
   };
-  dlg.showModal();
 }
 
 // ---------- Edit part of a picture (inpainting) ----------
@@ -599,6 +610,58 @@ function maskImage() {
   return painted ? out.toDataURL("image/png") : null;
 }
 
+// Redraws the white part of `mask` on a gallery picture and saves the result
+// as a new picture. `units` are optional ControlNet references.
+async function inpaint(img, { mask, change, strength, units = [], status }) {
+  const s = S();
+  const size = new Image();
+  size.src = img.src;
+  await size.decode();
+  const poll = setInterval(async () => {
+    try {
+      const p = await (await fetch(`${base()}/sdapi/v1/progress?skip_current_image=true`)).json();
+      if (p.progress > 0) status(`Working… ${Math.round(p.progress * 100)}%`);
+    } catch {}
+  }, 1500);
+  try {
+    const res = await fetch(`${base()}/sdapi/v1/img2img`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        init_images: [img.src],
+        mask,
+        prompt: `${change}, same person, same lighting, photo`,
+        negative_prompt: [s.imageNegative, ANATOMY_NEGATIVE, ALWAYS_NEGATIVE,
+          /\b(nude|naked|bare|topless|undressed|no clothes)\b/i.test(change) && "clothes, fabric, underwear, bra"].filter(Boolean).join(", "),
+        denoising_strength: strength,
+        inpainting_fill: 1, // start from the original pixels, so shapes and skin tone carry over
+        inpaint_full_res: true, // redraw the masked area up close for detail
+        inpaint_full_res_padding: 48,
+        mask_blur: 8,
+        width: size.naturalWidth,
+        height: size.naturalHeight,
+        steps: s.imageSteps,
+        cfg_scale: CFG,
+        sampler_name: "DPM++ 2M",
+        scheduler: "Karras",
+        ...(units.length ? { alwayson_scripts: { ControlNet: { args: units } } } : {}),
+      }),
+    });
+    if (!res.ok) throw new Error(`error ${res.status}`);
+    const image = (await res.json()).images?.[0];
+    if (!image) throw new Error("no image returned");
+    const edited = { id: uid(), prompt: `${img.prompt} (edited: ${change})`, src: await toJpeg(image), created: Date.now() };
+    saved ??= (await loadExtra("images")) ?? [];
+    saved.unshift(edited);
+    saved.splice(MAX_SAVED);
+    persistImages();
+    renderGallery();
+    return edited;
+  } finally {
+    clearInterval(poll);
+  }
+}
+
 async function applyEdit() {
   if (busy || !editing) return;
   const status = $("edit-status");
@@ -610,52 +673,15 @@ async function applyEdit() {
     status.className = "error";
     return (status.textContent = "Confidant won't make images involving anyone under 18.");
   }
-  const s = S();
-  const pic = $("edit-pic");
   busy = true;
   $("edit-apply").disabled = true;
   status.className = "muted";
   status.textContent = "Editing…";
-  const poll = setInterval(async () => {
-    try {
-      const p = await (await fetch(`${base()}/sdapi/v1/progress?skip_current_image=true`)).json();
-      if (p.progress > 0) status.textContent = `Editing… ${Math.round(p.progress * 100)}%`;
-    } catch {}
-  }, 1500);
   try {
-    const res = await fetch(`${base()}/sdapi/v1/img2img`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        init_images: [editing.src],
-        mask,
-        prompt: `${change}, same person, same lighting, photo`,
-        negative_prompt: [s.imageNegative, ANATOMY_NEGATIVE, ALWAYS_NEGATIVE,
-          /\b(nude|naked|bare|topless|undressed|no clothes)\b/i.test(change) && "clothes, fabric, underwear"].filter(Boolean).join(", "),
-        denoising_strength: Number($("edit-strength").value),
-        inpainting_fill: 1, // start from the original pixels, so shapes and skin tone carry over
-        inpaint_full_res: true, // redraw the painted area up close for detail
-        inpaint_full_res_padding: 48,
-        mask_blur: 8,
-        width: pic.naturalWidth,
-        height: pic.naturalHeight,
-        steps: s.imageSteps,
-        cfg_scale: CFG,
-        sampler_name: "DPM++ 2M",
-        scheduler: "Karras",
-      }),
-    });
-    if (!res.ok) throw new Error(`error ${res.status}`);
-    const image = (await res.json()).images?.[0];
-    if (!image) throw new Error("no image returned");
-    const edited = { id: uid(), prompt: `${editing.prompt} (edited: ${change})`, src: await toJpeg(image), created: Date.now() };
-    saved ??= (await loadExtra("images")) ?? [];
-    saved.unshift(edited);
-    saved.splice(MAX_SAVED);
-    persistImages();
-    renderGallery();
+    const edited = await inpaint(editing, { mask, change, strength: Number($("edit-strength").value), status: (t) => (status.textContent = t) });
     // Keep going from the result: paint again to change something else.
     editing = edited;
+    const pic = $("edit-pic");
     pic.src = edited.src;
     $("edit-mask").getContext("2d").clearRect(0, 0, pic.naturalWidth, pic.naturalHeight);
     status.textContent = "Done. It's saved in your pictures. Paint again to change something else.";
@@ -664,9 +690,53 @@ async function applyEdit() {
     status.className = "error";
     status.textContent = r.ok ? `The edit couldn't be made (${e.message}).` : r.message;
   } finally {
-    clearInterval(poll);
     busy = false;
     $("edit-apply").disabled = false;
+  }
+}
+
+// One-tap edits from the picture viewer: the clothes are found automatically.
+async function quickEdit(img, kind) {
+  if (busy) return;
+  const status = $("img-viewer-status");
+  const say = (t, cls = "muted") => {
+    status.textContent = t;
+    status.className = cls;
+  };
+  if (MINOR_TERMS.test(img.prompt)) return say("Confidant won't make images involving anyone under 18.", "error");
+  let change = "nude, bare skin, natural body, realistic skin texture";
+  let units = [];
+  if (kind === "outfit") {
+    const outfit = (refs ?? []).find((r) => r.id === $("img-viewer-outfit").value);
+    if (!outfit) return say("Pick an outfit first. Add outfits under Reference library → Outfits.", "error");
+    const { models } = await controlnetLists();
+    const style = styleAdapter(models);
+    if (!style) return say("Changing outfits needs the outfit model: see setup step 10.", "error");
+    change = `wearing ${outfit.name}, clothing`;
+    units = [{ enabled: true, module: "CLIP-ViT-H (IPAdapter)", model: style, weight: 0.75, image: outfit.src,
+      resize_mode: "Crop and Resize", control_mode: "Balanced", guidance_start: 0, guidance_end: 1 }];
+  }
+  busy = true;
+  for (const id of ["img-viewer-undress", "img-viewer-outfit-go"]) $(id).disabled = true;
+  try {
+    const { clothesMask } = await import("./segment.js");
+    const mask = await clothesMask(img.src, say);
+    if (!mask) return say("Couldn't find any clothes in this picture. Use \"Edit part of it\" and paint them instead.", "error");
+    say("Working…");
+    const edited = await inpaint(img, { mask, change, strength: kind === "outfit" ? 0.9 : 0.8, units, status: say });
+    $("img-viewer-pic").src = edited.src;
+    $("img-viewer-prompt").textContent = edited.prompt;
+    say("Done. It's saved in your pictures as a new one.");
+    bindViewer(edited);
+  } catch (e) {
+    console.error(e);
+    const r = await checkImages(base());
+    say(!r.ok ? r.message : /fetch|network|hugging/i.test(e.message)
+      ? "Couldn't download the clothes finder. Check your internet connection and try again."
+      : `That didn't work (${e.message}). You can use "Edit part of it" and paint the clothes instead.`, "error");
+  } finally {
+    busy = false;
+    for (const id of ["img-viewer-undress", "img-viewer-outfit-go"]) $(id).disabled = false;
   }
 }
 
