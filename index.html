@@ -250,6 +250,13 @@
               <option value="1216x832">Landscape, large (for SDXL / Pony models)</option>
             </select>
           </label>
+          <label>Face quality
+            <select id="img-quality">
+              <option value="repair">Best: sharper faces plus face repair (slower)</option>
+              <option value="sharp">Sharper faces (slower)</option>
+              <option value="fast">Fast (faces may look warped)</option>
+            </select>
+          </label>
           <label>Quality steps
             <select id="img-steps">
               <option value="15">15: faster</option>
@@ -458,7 +465,7 @@
         <button type="button" id="delete-models" class="secondary">Delete downloaded models</button>
         <button type="button" id="erase-all" class="danger">Erase everything</button>
       </div>
-      <p class="muted version">Confidant version 21</p>
+      <p class="muted version">Confidant version 22</p>
     </form>
   </dialog>
 

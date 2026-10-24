@@ -12,7 +12,28 @@ const MAX_SAVED = 60;
 // steer away from young-looking people.
 const MINOR_TERMS = /\b(child|children|kid|kids|minor|minors|underage|under-age|teen|teens|teenage|teenager|preteen|pre-teen|loli|lolita|shota|schoolgirl|schoolboy|school girl|school boy|toddler|baby|infant|jailbait|little girl|little boy|young girl|young boy|girl child|boy child)\b|\b([0-9]|1[0-7])\s*(yo|y\/o|years?[- ]old)\b/i;
 const ALWAYS_NEGATIVE = "child, teen, underage, young-looking, childlike, loli";
-const DEFAULT_NEGATIVE = "lowres, blurry, bad anatomy, bad hands, extra fingers, deformed, watermark, text, signature";
+const OLD_NEGATIVE = "lowres, blurry, bad anatomy, bad hands, extra fingers, deformed, watermark, text, signature";
+const DEFAULT_NEGATIVE = "lowres, blurry, bad anatomy, deformed face, disfigured, poorly drawn face, asymmetrical eyes, cross-eyed, bad hands, extra fingers, mutated hands, extra limbs, watermark, text, signature";
+const CFG = 6;
+
+// SD 1.5 draws faces from very few pixels at 512 px, so they warp. "sharp"
+// redraws the picture 1.5x larger (hires fix); "repair" also runs Forge's
+// face restoration afterwards. Large SDXL sizes don't need the extra pass.
+function qualityParams(quality, width, height) {
+  const small = width <= 768 && height <= 768;
+  const hires = quality !== "fast" && small
+    ? {
+        enable_hr: true,
+        hr_scale: 1.5,
+        hr_upscaler: "Latent",
+        denoising_strength: 0.5,
+        hr_second_pass_steps: 15,
+        hr_cfg: CFG, // Forge's API default is 1.0, which washes the second pass out
+        hr_additional_modules: ["Use same choices"],
+      }
+    : {};
+  return { ...hires, restore_faces: quality === "repair" };
+}
 
 let ctx; // { data(), persist(), engine(), ensureEngine() }
 let busy = false;
@@ -71,7 +92,7 @@ async function toJpeg(pngBase64) {
 const base = () => S().imagesUrl.replace(/\/+$/, "");
 
 export function freshImageSettings() {
-  return { imagesUrl: "http://127.0.0.1:7860", imageSize: "512x768", imageSteps: 25, imageNegative: DEFAULT_NEGATIVE, imageFaceWeight: 0.7 };
+  return { imagesUrl: "http://127.0.0.1:7860", imageSize: "512x768", imageSteps: 25, imageNegative: DEFAULT_NEGATIVE, imageFaceWeight: 0.7, imageQuality: "repair" };
 }
 
 export function initImages(context) {
@@ -102,7 +123,7 @@ export function initImages(context) {
     $("img-status").textContent = r.message;
     $("img-status").className = r.ok ? "ok" : "error";
   });
-  for (const [id, key, num] of [["img-size", "imageSize"], ["img-steps", "imageSteps", true], ["img-negative", "imageNegative"], ["img-url", "imagesUrl"], ["img-face-weight", "imageFaceWeight", true]]) {
+  for (const [id, key, num] of [["img-size", "imageSize"], ["img-steps", "imageSteps", true], ["img-negative", "imageNegative"], ["img-url", "imagesUrl"], ["img-face-weight", "imageFaceWeight", true], ["img-quality", "imageQuality"]]) {
     $(id).addEventListener("change", (e) => {
       S()[key] = num ? Number(e.target.value) : e.target.value.trim();
       ctx.persist();
@@ -116,6 +137,9 @@ export async function renderImages() {
   renderCharacters();
   const s = S();
   $("img-face-weight").value = String(s.imageFaceWeight ?? 0.7);
+  s.imageQuality ??= "repair";
+  if (s.imageNegative === OLD_NEGATIVE) s.imageNegative = DEFAULT_NEGATIVE; // upgrade the old default
+  $("img-quality").value = s.imageQuality;
   $("img-url").value = s.imagesUrl;
   $("img-size").value = s.imageSize;
   $("img-steps").value = String(s.imageSteps);
@@ -181,7 +205,7 @@ async function generate() {
       }))
     : [];
   $("img-status").className = "muted";
-  $("img-status").textContent = "Creating… the first image after starting Forge takes longer.";
+  $("img-status").textContent = "Creating… the first image after starting Forge takes longer (and face repair downloads a small helper the first time).";
   const poll = setInterval(async () => {
     try {
       const p = await (await fetch(`${base()}/sdapi/v1/progress?skip_current_image=true`)).json();
@@ -198,7 +222,8 @@ async function generate() {
         width,
         height,
         steps: s.imageSteps,
-        cfg_scale: 6,
+        cfg_scale: CFG,
+        ...qualityParams(s.imageQuality ?? "repair", width, height),
         sampler_name: "DPM++ 2M",
         scheduler: "Karras",
         ...(units.length ? { alwayson_scripts: { ControlNet: { args: units } } } : {}),
