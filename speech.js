@@ -2,7 +2,8 @@
 
 const FEMALE = ["samantha", "ava", "allison", "susan", "victoria", "karen", "moira", "tessa", "fiona", "serena",
   "zoe", "nicky", "kate", "veena", "joelle", "noelle", "kathy", "martha", "catherine", "isha", "sandy", "shelley",
-  "flo", "grandma", "female", "aria", "jenny", "emma", "libby", "sonia", "natasha", "nora"];
+  "flo", "grandma", "female", "aria", "jenny", "emma", "libby", "sonia", "natasha", "nora",
+  "zira", "hazel", "linda", "heather", "eva"]; // last line: Windows built-in voices
 
 const synth = window.speechSynthesis;
 let queue = [];
@@ -31,9 +32,13 @@ export function isFemale(v) {
   return FEMALE.some((f) => n.includes(f));
 }
 
-// English voices, best female voices first.
+// Some browsers (Chrome, Edge) offer "online" voices that send the text to
+// Google or Microsoft to be spoken. Only on-device voices are allowed.
+const onDevice = (v) => v.localService !== false && !/online|google/i.test(v.name);
+
+// English on-device voices, best female voices first.
 export async function rankedVoices() {
-  const list = (await voices()).filter((v) => /^en/i.test(v.lang));
+  const list = (await voices()).filter((v) => /^en/i.test(v.lang) && onDevice(v));
   const score = (v) => (isFemale(v) ? 10 : 0) + quality(v) * 2 + (/en-US/i.test(v.lang) ? 1 : 0) + (v.localService ? 1 : 0);
   return list.sort((a, b) => score(b) - score(a) || a.name.localeCompare(b.name));
 }
@@ -76,7 +81,8 @@ export async function speak(text, { voiceURI, rate = 1, onEnd } = {}) {
   if (!synth) return;
   stop();
   const list = await voices();
-  const voice = list.find((v) => v.voiceURI === voiceURI) ?? (await rankedVoices())[0];
+  const voice = list.find((v) => v.voiceURI === voiceURI && onDevice(v)) ?? (await rankedVoices())[0];
+  if (!voice) return onEnd?.(); // never fall back to a voice that leaves the device
   queue = chunks(clean(text));
   onDone = onEnd ?? null;
   const next = () => {
