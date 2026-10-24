@@ -279,6 +279,7 @@
             <li>Right-click the downloaded file → <strong>Extract All</strong> (or use 7-Zip) into a folder like <code>C:\Forge</code>.</li>
             <li>In that folder, open <code>webui\webui-user.bat</code> with Notepad and change the <code>set COMMANDLINE_ARGS=</code> line to:<br><code>set COMMANDLINE_ARGS=--api --cors-allow-origins=https://castlebayne.github.io</code><br>Save and close.</li>
             <li>Download an image model into <code>webui\models\Stable-diffusion</code>. Fast one (2.1 GB):<br><code>huggingface.co/philz1337x/epicrealism/resolve/main/epicrealism_naturalSinRC1VAE.safetensors</code></li>
+            <li>Forge has a bug that stops it from letting Confidant in. Open PowerShell in the Forge folder (click the folder's address bar, type <code>powershell</code>, press Enter) and run:<br><code>$f = (Get-ChildItem . -Recurse -Filter initialize_util.py | Where-Object { $_.FullName -like '*\webui\modules\*' } | Select-Object -First 1).FullName; (Get-Content $f) -replace '^(\s*)app\.build_middleware_stack\(\).*$', '$1app.middleware_stack = None  # Confidant fix' | Set-Content -Encoding utf8 $f</code><br>Run it again if you ever use <code>update.bat</code>.</li>
             <li>Double-click <code>update.bat</code> once, then <code>run.bat</code>. The first start takes a few minutes. When a browser page for Forge opens, it's ready; leave the black window open.</li>
             <li>Back here, open <strong>Image settings → Test connection</strong>.</li>
             <li>For character faces: download the face-reference model (98 MB) into <code>webui\models\ControlNet</code>:<br><code>huggingface.co/h94/IP-Adapter/resolve/main/models/ip-adapter-plus-face_sd15.safetensors</code><br>then restart Forge. The first character picture downloads a 2.5 GB helper automatically, so it takes a while once.</li>
@@ -457,7 +458,7 @@
         <button type="button" id="delete-models" class="secondary">Delete downloaded models</button>
         <button type="button" id="erase-all" class="danger">Erase everything</button>
       </div>
-      <p class="muted version">Confidant version 20</p>
+      <p class="muted version">Confidant version 21</p>
     </form>
   </dialog>
 

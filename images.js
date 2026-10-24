@@ -143,7 +143,7 @@ export async function checkImages(url) {
     return {
       ok: false,
       message: answers
-        ? "Forge is running, but isn't letting Confidant connect. Check the COMMANDLINE_ARGS line in webui-user.bat from the setup steps, then close and restart Forge."
+        ? "Forge is running, but isn't letting Confidant connect. Check the COMMANDLINE_ARGS line in webui-user.bat and run the Forge fix command from the setup steps, then close and restart Forge."
         : "Can't reach the image program. Start Forge (run.bat) and wait until it says \"Running on local URL\", then try again.",
     };
   }
