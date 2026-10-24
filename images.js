@@ -135,6 +135,95 @@ const poseModel = (models) => models.find((m) => /openpose/i.test(m) && !/sdxl/i
 const posePreprocessor = (modules) => modules.find((m) => /^dw_openpose_full$/i.test(m))
   ?? modules.find((m) => /^openpose_full$/i.test(m)) ?? modules.find((m) => /openpose/i.test(m)) ?? "openpose_full";
 
+// ---------- Importing AI pictures ----------
+// Only pictures that carry an AI generator's data can be imported (and so
+// edited). Camera photos don't have it, which keeps real people out.
+
+function pngTextChunks(bytes) {
+  const out = {};
+  const sig = [137, 80, 78, 71, 13, 10, 26, 10];
+  if (!sig.every((b, i) => bytes[i] === b)) return out;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const latin = new TextDecoder("latin1");
+  const utf8 = new TextDecoder();
+  for (let i = 8; i + 8 <= bytes.length;) {
+    const len = view.getUint32(i);
+    const type = latin.decode(bytes.subarray(i + 4, i + 8));
+    const data = bytes.subarray(i + 8, i + 8 + len);
+    if (type === "tEXt" || type === "iTXt") {
+      const nul = data.indexOf(0);
+      const key = latin.decode(data.subarray(0, nul));
+      let text = data.subarray(nul + 1);
+      if (type === "iTXt") {
+        // compression flag, method, then language and translated keyword, each NUL-terminated
+        if (text[0] !== 0) { i += 12 + len; continue; }
+        let rest = text.subarray(2);
+        for (let n = 0; n < 2; n++) rest = rest.subarray(rest.indexOf(0) + 1);
+        text = rest;
+      }
+      out[key] = (type === "iTXt" ? utf8 : latin).decode(text);
+    }
+    if (type === "IEND") break;
+    i += 12 + len;
+  }
+  return out;
+}
+
+// Returns { ok, prompt } for a picture file's bytes.
+export function aiOrigin(bytes) {
+  const chunks = pngTextChunks(bytes);
+  const params = chunks.parameters ?? chunks.Comment ?? chunks.Description ?? "";
+  const fromParams = (t) => t.split(/\nNegative prompt:|\nSteps:/)[0].trim();
+  // Forge, Automatic1111, Fooocus, SD.Next
+  if (/\bSteps: \d+/.test(params) || chunks.parameters) return { ok: true, prompt: fromParams(params) };
+  // ComfyUI, InvokeAI, NovelAI
+  if (chunks.workflow || chunks.prompt || chunks.invokeai_metadata || chunks["sd-metadata"] || /novelai/i.test(chunks.Software ?? "")) {
+    return { ok: true, prompt: (chunks.Description ?? "").trim() };
+  }
+  // Any format: content credentials or IPTC "made by AI" tags (Midjourney,
+  // DALL-E, Firefly and others), or Automatic1111 data in JPEG/WebP EXIF.
+  const latin = new TextDecoder("latin1").decode(bytes);
+  if (/trainedalgorithmicmedia/i.test(latin)) return { ok: true, prompt: "" };
+  const wide = new TextDecoder("utf-16le").decode(bytes.subarray(0, Math.min(bytes.length, 400000)));
+  for (const t of [latin, wide]) {
+    const m = t.match(/([^\0]{0,2000}?)\n?Steps: \d+, Sampler: /);
+    if (m) return { ok: true, prompt: fromParams(m[1].replace(/^[\s\S]*?(UNICODE|ASCII)\0*/, "")) };
+  }
+  return { ok: false, prompt: "" };
+}
+
+async function importPictures(files) {
+  const refused = [];
+  let added = 0;
+  saved ??= (await loadExtra("images")) ?? [];
+  for (const file of files) {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const origin = aiOrigin(bytes);
+    if (!origin.ok || MINOR_TERMS.test(origin.prompt)) {
+      refused.push(file.name);
+      continue;
+    }
+    const url = URL.createObjectURL(file);
+    try {
+      saved.unshift({ id: uid(), prompt: origin.prompt || `Imported: ${file.name}`, src: await shrink(url, 1536), created: Date.now(), imported: true });
+      added++;
+    } catch {
+      refused.push(file.name);
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+  saved.splice(MAX_SAVED);
+  persistImages();
+  renderGallery();
+  const status = $("img-status");
+  status.className = refused.length ? "error" : "muted";
+  status.textContent = [
+    added && `Imported ${added} picture${added > 1 ? "s" : ""}. Tap one, then "Edit part of it".`,
+    refused.length && `Not imported: ${refused.join(", ")}. ${refused.length > 1 ? "They don't" : "It doesn't"} carry AI-generator data. Use the original file straight from Forge, ComfyUI, NovelAI, Midjourney, DALL-E or Firefly: screenshots and re-saved copies lose that data.`,
+  ].filter(Boolean).join(" ");
+}
+
 // PNGs from the image program are large; JPEG keeps storage small.
 async function toJpeg(pngBase64) {
   const img = new Image();
@@ -156,6 +245,11 @@ export function initImages(context) {
   ctx = context;
   $("img-generate").addEventListener("click", generate);
   setupEditor();
+  $("img-import").addEventListener("change", async (e) => {
+    const files = [...e.target.files];
+    e.target.value = "";
+    if (files.length) await importPictures(files);
+  });
   $("img-stop").addEventListener("click", () => fetch(`${base()}/sdapi/v1/interrupt`, { method: "POST" }).catch(() => {}));
   $("img-from-notes").addEventListener("click", promptFromNotes);
   $("char-add").addEventListener("click", () => openCharEditor());

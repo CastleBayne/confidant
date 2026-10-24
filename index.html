@@ -278,6 +278,10 @@
         <p id="img-status" aria-live="polite"></p>
         <div id="img-gallery" class="gallery"></div>
         <p id="img-empty" class="muted">Your pictures will appear here.</p>
+        <label class="secondary file-btn">Import AI pictures
+          <input id="img-import" type="file" accept="image/png,image/jpeg,image/webp" multiple hidden>
+        </label>
+        <small>Only original files from AI image tools can be imported, so real photos can't be edited here.</small>
         <details class="advanced">
           <summary>Image settings</summary>
           <label>Size
@@ -511,7 +515,7 @@
         <button type="button" id="delete-models" class="secondary">Delete downloaded models</button>
         <button type="button" id="erase-all" class="danger">Erase everything</button>
       </div>
-      <p class="muted version">Confidant version 36</p>
+      <p class="muted version">Confidant version 37</p>
     </form>
   </dialog>
 
