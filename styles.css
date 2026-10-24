@@ -312,3 +312,8 @@ dialog.sheet::backdrop { background: rgba(0, 0, 0, 0.5); }
 .flag-ai { color: var(--danger); font-weight: 700; }
 .flag-new { text-decoration: underline wavy var(--accent); text-underline-offset: 3px; }
 .flag-cliche { text-decoration: underline 2px #f0a040; text-underline-offset: 3px; }
+.update-banner {
+  border: 0; padding: 10px 16px; font-weight: 600; cursor: pointer;
+  background: var(--accent); color: var(--accent-text);
+}
+.version { font-size: 13px; text-align: center; margin-top: 24px; }

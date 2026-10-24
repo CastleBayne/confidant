@@ -59,7 +59,14 @@ const persist = () => data && store.save(data).catch((e) => console.error("Save 
 
 async function start() {
   if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("sw.js").catch(() => {});
+    // A new version took over: offer a restart instead of waiting for the next launch.
+    const hadController = Boolean(navigator.serviceWorker.controller);
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (hadController) $("update-banner").hidden = false;
+    });
+    navigator.serviceWorker.register("sw.js", { updateViaCache: "none" })
+      .then((reg) => reg.update())
+      .catch(() => {});
   }
   navigator.storage?.persist?.().catch(() => {});
 
@@ -714,6 +721,7 @@ input.addEventListener("keydown", (e) => {
 $("stop").addEventListener("click", () => engine?.interruptGenerate());
 
 $("load-model").addEventListener("click", loadModel);
+$("update-banner").addEventListener("click", () => location.reload());
 $("toggle-writing").addEventListener("click", () => showWriting($("writing").hidden));
 initWriting({
   data: () => data,
