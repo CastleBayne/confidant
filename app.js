@@ -1,6 +1,6 @@
 import * as store from "./store.js";
 import { MODELS, DEFAULT_MODEL, CUSTOM_CTX, resolveModelId, hostedRecords } from "./models.js";
-import { freshWriting, initWriting, showWriting, writingContext, passagePrompt, inVoice } from "./writing.js";
+import { freshWriting, initWriting, showWriting, writingContext, passagePrompt, followUpPrompt, inVoice } from "./writing.js";
 import { stripDashes } from "./voice.js";
 import { freshImageSettings, forgetImages } from "./images.js";
 import { isGgufDownloaded } from "./gguf-engine.js";
@@ -363,11 +363,12 @@ async function send(text) {
     // (plain text, no chat framing), which keeps their voice far better.
     // Retry sends no text: reuse the last thing the user sent.
     const asked = text ?? c.messages.findLast((m) => m.role === "user")?.content;
-    const manuscript = asked && engine.completions ? passagePrompt(asked) : null;
+    const earlier = c.messages.slice(0, c.messages.findLastIndex((m) => m.role === "user"));
+    const manuscript = asked && engine.completions ? passagePrompt(asked) ?? followUpPrompt(earlier, asked) : null;
     const short = (name) => name.split("/").pop().replace(/-GGUF.*|:.*$/i, "");
     reply.via = manuscript ? null
       : !engine.completions ? "Chat model. Your-voice writing needs the computer's AI."
-      : asked && asked.length > 150 ? "Chat model: too short to continue as your book. Paste at least 5 lines of story."
+      : asked && asked.length > 150 ? "Chat model: not treated as your book. Paste a few lines of story, or add \"continue\" to it."
       : `Chat · ${short(data.settings.computerModel)}`;
     if (manuscript) {
       // The writing model can take a minute to load and read the book; say so.

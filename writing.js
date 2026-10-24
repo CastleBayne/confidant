@@ -572,16 +572,45 @@ const ASKS_TO_WRITE = /\b(continue|keep going|keep writing|write|finish|next|wha
 // When a chat message is a pasted passage (optionally with a short request
 // like "continue this" before or after it), returns a manuscript prompt so
 // the model carries on the passage in the author's voice. Otherwise null.
-export function passagePrompt(message) {
+const sentenceCount = (t) => (t.match(/[.!?…]["”’]?(\s|$)/g) ?? []).length;
+const JUST_CONTINUE = /^\s*(please\s+)?(can you\s+)?(continue|keep going|keep writing|carry on|finish)\b[^.]{0,40}[.?>!]*\s*$/i;
+// "Write what happens next: X" becomes just "X" (the prompt already says what happens next).
+const noteFrom = (note) => (JUST_CONTINUE.test(note) ? "" : note.replace(/^\s*(please\s+)?(write\s+)?what happens next\s*[:,-]?\s*/i, ""));
+
+// Splits a message into a short writing request (if any) and the story text.
+function splitAsk(message) {
   const paras = message.trim().split(/\n\s*\n|\n/).map((p) => p.trim()).filter(Boolean);
-  if (message.length < 400 || paras.length < 2) return null;
   let note = "";
-  if (paras[0].length < 200 && ASKS_TO_WRITE.test(paras[0])) note = paras.shift();
-  else if (paras.at(-1).length < 200 && ASKS_TO_WRITE.test(paras.at(-1))) note = paras.pop();
-  const passage = paras.join("\n\n");
-  // Prose, not a question: several sentences of story text.
-  if (passage.length < 300 || (passage.match(/[.!?…]["”’]?(\s|$)/g) ?? []).length < 4) return null;
-  return manuscriptPrompt({ notes: /^\s*(continue|keep going|keep writing|carry on)\b[^.]*\.?\s*$/i.test(note) ? "" : note, text: passage });
+  if (paras.length > 1 && paras[0].length < 200 && ASKS_TO_WRITE.test(paras[0])) note = paras.shift();
+  else if (paras.length > 1 && paras.at(-1).length < 200 && ASKS_TO_WRITE.test(paras.at(-1))) note = paras.pop();
+  return { note, passage: paras.join("\n\n") };
+}
+
+// Prose, not a question: several sentences of story text. With an explicit
+// request ("continue from here"), a single short paragraph is enough.
+function isStory(passage, asked) {
+  return asked ? passage.length >= 150 && sentenceCount(passage) >= 2 : passage.length >= 300 && sentenceCount(passage) >= 4;
+}
+
+export function passagePrompt(message) {
+  const { note, passage } = splitAsk(message);
+  if (!note && (message.length < 400 || !/\n/.test(message.trim()))) return null;
+  if (!isStory(passage, Boolean(note))) return null;
+  return manuscriptPrompt({ notes: noteFrom(note), text: passage });
+}
+
+const FOLLOW_UP = /^\s*(ok(ay)?,?\s+|now\s+|please\s+)*((can|could|will) you\s+)?(continue|keep going|keep writing|carry on|finish|write (what happens|the next|more|on)|what happens next|next:|pick up)/i;
+
+// A short request on its own ("Write what happens next: ...", "continue")
+// carries on the story from earlier in the chat: the last passage the user
+// pasted plus the replies written in their voice since.
+export function followUpPrompt(messages, message) {
+  if (message.length > 400 || !FOLLOW_UP.test(message)) return null;
+  const start = messages.findLastIndex((m) => m.role === "user" && isStory(splitAsk(m.content).passage, true));
+  if (start === -1) return null;
+  const story = [splitAsk(messages[start].content).passage,
+    ...messages.slice(start + 1).filter((m) => m.role === "assistant" && /^Your voice/.test(m.via ?? "")).map((m) => m.content)];
+  return manuscriptPrompt({ notes: noteFrom(message.trim()), text: story.join("\n\n") });
 }
 
 async function generate(mode) {
