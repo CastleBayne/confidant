@@ -3,6 +3,7 @@
 import { AI_TELLS, analyze, buildProfile, pickExcerpts, vocabularyCsv, checkText, words, stripDashes, countDashes } from "./voice.js";
 import { readDocx } from "./docx.js";
 import * as speech from "./speech.js";
+import { initImages, renderImages } from "./images.js";
 
 const WRITE_TOKENS = 700;
 const CHARS_PER_TOKEN = 3.5;
@@ -97,6 +98,8 @@ export function initWriting(context) {
 
   // Check
   $("check-run").addEventListener("click", runCheck);
+
+  initImages({ ...ctx, chapterNotes: () => currentChapter().notes });
 }
 
 export function showWriting(on) {
@@ -112,7 +115,7 @@ function showTab(tab) {
   document.querySelectorAll(".tabs [data-tab]").forEach((b) =>
     b.setAttribute("aria-selected", String(b.dataset.tab === tab)));
   document.querySelectorAll("#writing .tab-panel").forEach((p) => (p.hidden = p.dataset.panel !== tab));
-  ({ samples: renderSamples, voice: renderVoice, book: renderBook, check: () => {} })[tab]();
+  ({ samples: renderSamples, voice: renderVoice, book: renderBook, check: () => {}, images: renderImages })[tab]();
 }
 
 // ---------- Samples ----------

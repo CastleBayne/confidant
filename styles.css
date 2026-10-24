@@ -322,3 +322,13 @@ dialog.sheet::backdrop { background: rgba(0, 0, 0, 0.5); }
 .card.computer { display: grid; gap: 8px; margin-top: 0; }
 .card.computer label { margin-top: 0; }
 .card.computer code { word-break: break-all; }
+.tabs { overflow-x: auto; }
+.tabs button { flex: 1 0 auto; padding-left: 10px; padding-right: 10px; }
+.gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; margin-top: 12px; }
+.gallery figure { margin: 0; }
+.gallery img { width: 100%; border-radius: 10px; display: block; cursor: pointer; background: var(--panel); }
+dialog.viewer { max-width: min(720px, 96vw); max-height: 96vh; padding: 0; border: 0; border-radius: 16px; background: var(--bg); color: var(--text); }
+dialog.viewer::backdrop { background: rgba(0, 0, 0, 0.7); }
+.viewer-inner { padding: 12px; }
+.viewer-inner img { width: 100%; max-height: 70vh; object-fit: contain; border-radius: 10px; }
+#img-status.ok { color: #4caf7a; }

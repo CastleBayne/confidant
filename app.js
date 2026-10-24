@@ -2,6 +2,7 @@ import * as store from "./store.js";
 import { MODELS, DEFAULT_MODEL, CUSTOM_CTX, resolveModelId, hostedRecords } from "./models.js";
 import { freshWriting, initWriting, showWriting, writingContext } from "./writing.js";
 import { stripDashes } from "./voice.js";
+import { freshImageSettings, forgetImages } from "./images.js";
 import { isGgufDownloaded } from "./gguf-engine.js";
 import { checkComputer } from "./remote-engine.js";
 import * as speech from "./speech.js";
@@ -44,6 +45,7 @@ function freshData() {
       customLib: "",
       memoryOn: true,
       noDashes: true,
+      ...freshImageSettings(),
       writingInChat: true,
       computerOn: false,
       computerUrl: "http://localhost:11434",
@@ -731,6 +733,9 @@ async function lockNow() {
   showWriting(false);
   document.querySelectorAll("#writing textarea, #writing input").forEach((el) => (el.value = ""));
   $("check-highlight").replaceChildren();
+  $("img-gallery").replaceChildren();
+  forgetImages();
+  if ($("img-viewer").open) $("img-viewer").close();
   showLock();
 }
 

@@ -99,15 +99,37 @@ export async function save(obj) {
   await put({ data: meta?.encrypted ? await encrypt(obj) : obj });
 }
 
+// Large things (pictures) live in their own records so saving a chat
+// doesn't rewrite them. They're encrypted the same way as the main record.
+const EXTRAS = ["images"];
+
+export async function loadExtra(name) {
+  const meta = await get("meta");
+  const box = await get(`extra:${name}`);
+  if (!box) return null;
+  return meta?.encrypted ? decrypt(box) : box;
+}
+
+export async function saveExtra(name, obj) {
+  const meta = await get("meta");
+  await put({ [`extra:${name}`]: meta?.encrypted ? await encrypt(obj) : obj });
+}
+
 // Pass null to remove the passcode and store data unencrypted again.
 export async function setPasscode(passcode, obj) {
+  const extras = {};
+  for (const name of EXTRAS) extras[name] = await loadExtra(name);
   if (passcode) {
     const salt = crypto.getRandomValues(new Uint8Array(16));
     key = await deriveKey(passcode, salt);
-    await put({ meta: { encrypted: true, salt }, data: await encrypt(obj) });
+    const records = { meta: { encrypted: true, salt }, data: await encrypt(obj) };
+    for (const [name, v] of Object.entries(extras)) if (v) records[`extra:${name}`] = await encrypt(v);
+    await put(records);
   } else {
     key = null;
-    await put({ meta: { encrypted: false }, data: obj });
+    const records = { meta: { encrypted: false }, data: obj };
+    for (const [name, v] of Object.entries(extras)) if (v) records[`extra:${name}`] = v;
+    await put(records);
   }
 }
 

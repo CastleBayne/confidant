@@ -99,6 +99,7 @@
         <button role="tab" data-tab="voice">Voice</button>
         <button role="tab" data-tab="book">Book</button>
         <button role="tab" data-tab="check">Check</button>
+        <button role="tab" data-tab="images">Images</button>
       </nav>
 
       <div class="tab-panel" data-panel="samples">
@@ -200,6 +201,58 @@
           <button type="button" id="chapter-delete" class="link danger-link">Delete chapter</button>
         </div>
         <small>Treat what it writes as a first draft. It works best a few paragraphs at a time, and with your own edits in between.</small>
+      </div>
+
+      <div class="tab-panel" data-panel="images" hidden>
+        <p class="muted">Creates pictures with an image program on your computer. Pictures are kept privately in this app. Adults only: requests involving anyone under 18 are refused, and never use real people.</p>
+        <label>Describe the picture
+          <textarea id="img-prompt" rows="4" placeholder="e.g. woman with long black hair in a loose knot, candlelit room, fireplace, cinematic lighting, photo"></textarea>
+        </label>
+        <div class="btn-row">
+          <button type="button" id="img-generate" class="primary">Create image</button>
+          <button type="button" id="img-from-notes" class="secondary">Describe from my chapter notes</button>
+          <button type="button" id="img-stop" class="secondary" hidden>Stop</button>
+        </div>
+        <p id="img-status" aria-live="polite"></p>
+        <div id="img-gallery" class="gallery"></div>
+        <p id="img-empty" class="muted">Your pictures will appear here.</p>
+        <details class="advanced">
+          <summary>Image settings</summary>
+          <label>Size
+            <select id="img-size">
+              <option value="512x768">Portrait, small (fast; for SD 1.5 models)</option>
+              <option value="768x512">Landscape, small (fast)</option>
+              <option value="512x512">Square, small (fast)</option>
+              <option value="832x1216">Portrait, large (for SDXL / Pony models)</option>
+              <option value="1216x832">Landscape, large (for SDXL / Pony models)</option>
+            </select>
+          </label>
+          <label>Quality steps
+            <select id="img-steps">
+              <option value="15">15: faster</option>
+              <option value="25">25: balanced</option>
+              <option value="35">35: more detail</option>
+            </select>
+          </label>
+          <label>Things to avoid
+            <textarea id="img-negative" rows="2"></textarea>
+          </label>
+          <label>Image program address
+            <input id="img-url" type="url" autocomplete="off">
+          </label>
+          <button type="button" id="img-test" class="secondary">Test connection</button>
+        </details>
+        <details class="advanced">
+          <summary>One-time setup on the computer</summary>
+          <ol class="steps">
+            <li>Download <strong>Forge</strong> (1.9 GB):<br><code>github.com/lllyasviel/stable-diffusion-webui-forge/releases/download/latest/webui_forge_cu121_torch231.7z</code></li>
+            <li>Right-click the downloaded file → <strong>Extract All</strong> (or use 7-Zip) into a folder like <code>C:\Forge</code>.</li>
+            <li>In that folder, open <code>webui\webui-user.bat</code> with Notepad and change the <code>set COMMANDLINE_ARGS=</code> line to:<br><code>set COMMANDLINE_ARGS=--api --cors-allow-origins=https://castlebayne.github.io</code><br>Save and close.</li>
+            <li>Download an image model into <code>webui\models\Stable-diffusion</code>. Fast one (2.1 GB):<br><code>huggingface.co/philz1337x/epicrealism/resolve/main/epicrealism_naturalSinRC1VAE.safetensors</code></li>
+            <li>Double-click <code>update.bat</code> once, then <code>run.bat</code>. The first start takes a few minutes. When a browser page for Forge opens, it's ready; leave the black window open.</li>
+            <li>Back here, open <strong>Image settings → Test connection</strong>.</li>
+          </ol>
+        </details>
       </div>
 
       <div class="tab-panel" data-panel="check" hidden>
@@ -373,7 +426,20 @@
         <button type="button" id="delete-models" class="secondary">Delete downloaded models</button>
         <button type="button" id="erase-all" class="danger">Erase everything</button>
       </div>
-      <p class="muted version">Confidant version 17</p>
+      <p class="muted version">Confidant version 18</p>
+    </form>
+  </dialog>
+
+  <dialog id="img-viewer" class="viewer">
+    <form method="dialog" class="viewer-inner">
+      <img id="img-viewer-pic" alt="">
+      <p id="img-viewer-prompt" class="muted"></p>
+      <div class="btn-row">
+        <button type="button" id="img-viewer-save" class="primary">Save</button>
+        <button type="button" id="img-viewer-reuse" class="secondary">Use description</button>
+        <button type="button" id="img-viewer-delete" class="danger">Delete</button>
+        <button value="close" class="link">Close</button>
+      </div>
     </form>
   </dialog>
 
