@@ -1,0 +1,57 @@
+# Converts an open "abliterated" (refusal-removed) model into WebLLM's MLC
+# format and publishes it on this Pages site, so the app can load it from
+# its own origin. Runs when this file changes, or manually.
+name: Build uncensored model
+
+on:
+  push:
+    branches: [gh-pages]
+    paths: [".github/workflows/build-model.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      SOURCE: huihui-ai/Llama-3.2-1B-Instruct-abliterated
+      OUT: models/Llama-3.2-1B-Instruct-abliterated-q4f16_1-MLC/resolve/main
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install MLC LLM
+        run: pip install --pre -U -f https://mlc.ai/wheels mlc-llm-nightly-cpu mlc-ai-nightly-cpu huggingface_hub
+
+      - name: Download source model
+        run: |
+          python -c "from huggingface_hub import snapshot_download; snapshot_download('$SOURCE', local_dir='src', allow_patterns=['*.json', '*.safetensors', 'tokenizer*'])"
+          ls -la src
+
+      - name: Convert to MLC format
+        run: |
+          mlc_llm convert_weight src --quantization q4f16_1 -o "$OUT"
+          mlc_llm gen_config src --quantization q4f16_1 --conv-template llama-3_1 \
+            --context-window-size 4096 --prefill-chunk-size 1024 -o "$OUT"
+          # Newer WebLLM reads tensor-cache.json; older converters write ndarray-cache.json
+          if [ -f "$OUT/ndarray-cache.json" ] && [ ! -f "$OUT/tensor-cache.json" ]; then
+            cp "$OUT/ndarray-cache.json" "$OUT/tensor-cache.json"
+          fi
+          ls -la "$OUT"
+          du -sh "$OUT"
+
+      - name: Publish
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add models
+          git commit -m "Add Llama 3.2 1B abliterated (q4f16_1, MLC)"
+          git push
