@@ -1,0 +1,37 @@
+# One-off lookup: image generator package and checkpoints that download without an account.
+name: Find image models
+on:
+  push:
+    branches: [gh-pages]
+    paths: [".github/workflows/find-models.yml"]
+jobs:
+  find:
+    runs-on: ubuntu-latest
+    steps:
+      - shell: python
+        run: |
+          import json, urllib.request
+          def get(url):
+              try:
+                  req = urllib.request.Request(url, headers={"User-Agent": "confidant"})
+                  with urllib.request.urlopen(req, timeout=30) as r: return json.load(r)
+              except Exception as e: return {"error": str(e)}
+          print("=== Forge releases")
+          for rel in (get("https://api.github.com/repos/lllyasviel/stable-diffusion-webui-forge/releases?per_page=5") or [])[:5]:
+              if isinstance(rel, dict) and "assets" in rel:
+                  print(rel["tag_name"], rel["published_at"], [(a["name"], round(a["size"]/1e9, 2), a["browser_download_url"]) for a in rel["assets"]])
+          def show(repo):
+              info = get(f"https://huggingface.co/api/models/{repo}?blobs=true")
+              if "error" in info: print(repo, "->", info["error"][:80]); return
+              files = [(s["rfilename"], round((s.get("size") or 0)/1e9, 2)) for s in info.get("siblings", []) if s["rfilename"].endswith(".safetensors") and "/" not in s["rfilename"]]
+              print(f"{repo} | gated={info.get('gated')} | dl={info.get('downloads')} | {files[:6]}")
+          print("\n=== SD 1.5 checkpoints")
+          for r in ["SG161222/Realistic_Vision_V6.0_B1_noVAE", "SG161222/Realistic_Vision_V5.1_noVAE", "Lykon/DreamShaper", "Lykon/dreamshaper-8", "stablediffusionapi/realistic-vision-v51", "XpucT/Deliberate", "emilianJR/epiCRealism", "digiplay/majicMIX_realistic_v7"]:
+              show(r)
+          print("\n=== SDXL checkpoints")
+          for r in ["SG161222/RealVisXL_V5.0", "SG161222/RealVisXL_V4.0", "Lykon/dreamshaper-xl-lightning", "John6666/pony-realism-v22main-sdxl", "LyliaEngine/Pony_Diffusion_V6_XL", "Linaqruf/animagine-xl-3.1"]:
+              show(r)
+          print("\n=== search single-file pony / sd15 nsfw")
+          for q in ["Pony_Diffusion_V6_XL", "ponyDiffusionV6XL", "epicrealism", "cyberrealistic"]:
+              res = get(f"https://huggingface.co/api/models?search={q}&sort=downloads&direction=-1&limit=5")
+              for m in res if isinstance(res, list) else []: show(m["id"])
