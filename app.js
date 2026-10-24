@@ -377,7 +377,7 @@ async function send(text) {
       waitTimer = setInterval(wait, 1000);
     }
     const stream = manuscript
-      ? inVoice(engine, { prompt: manuscript, stop: ["[", "* * *"], max_tokens: REPLY_TOKENS, temperature: 0.9, top_p: 0.92, frequency_penalty: 0.4, presence_penalty: 0.3 })
+      ? inVoice(engine, { prompt: manuscript, stop: ["[", "* * *"], max_tokens: REPLY_TOKENS, temperature: 0.78, top_p: 0.9, frequency_penalty: 0.3, presence_penalty: 0.2 })
       : await engine.chat.completions.create({
           messages: contextMessages(c.messages.slice(0, -1)),
           stream: true,

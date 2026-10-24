@@ -13,9 +13,10 @@ const promptChars = () => (ctx.contextTokens() - WRITE_TOKENS) * CHARS_PER_TOKEN
 // Sampling for book writing. Higher variety means less predictable word
 // choices and stronger penalties for repeating words and phrases.
 const VARIETY = {
-  low: { temperature: 0.75, top_p: 0.9, frequency_penalty: 0.2, presence_penalty: 0.1 },
-  medium: { temperature: 0.95, top_p: 0.92, frequency_penalty: 0.45, presence_penalty: 0.3 },
-  high: { temperature: 1.1, top_p: 0.95, frequency_penalty: 0.7, presence_penalty: 0.5 },
+  // Base models drift and mix up characters when sampling runs hot.
+  low: { temperature: 0.65, top_p: 0.88, frequency_penalty: 0.15, presence_penalty: 0.1 },
+  medium: { temperature: 0.78, top_p: 0.9, frequency_penalty: 0.3, presence_penalty: 0.2 },
+  high: { temperature: 0.95, top_p: 0.93, frequency_penalty: 0.5, presence_penalty: 0.35 },
 };
 
 const $ = (id) => document.getElementById(id);
