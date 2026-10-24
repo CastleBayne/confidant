@@ -202,6 +202,11 @@ function renderVoice() {
   $("voice-words").replaceChildren(...sigWords.slice(0, 60).map((x) => wordChip(x, countOf.get(x))));
   $("voice-phrases").replaceChildren(...s.phrases.map(([p, c]) => wordChip(p, c)));
   $("voice-openers").replaceChildren(...s.openers.map(([o, c]) => chip(`${o}…`, c)));
+  $("voice-dialogue").replaceChildren(
+    ...s.dialogue.verbs.slice(0, 8).map(([v, c]) => chip(v, c)),
+    ...s.dialogue.adverbs.slice(0, 12).map(([a, c]) => chip(a, c)),
+    ...(s.dialogue.thoughts ? [chip("thought to himself/herself", s.dialogue.thoughts)] : []));
+  $("voice-names").replaceChildren(...s.names.map(([n, c]) => chip(n[0].toUpperCase() + n.slice(1), c)));
   $("voice-punct").replaceChildren(...Object.entries(s.punctuation).map(([k, v]) => stat(v, k)));
   $("voice-ai").replaceChildren(...buildAvoidChips(s));
 

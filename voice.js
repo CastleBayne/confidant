@@ -71,25 +71,64 @@ function count(map, key) {
 
 const per1k = (n, total) => (total ? Math.round((n / total) * 10000) / 10 : 0);
 
+const NOT_NAMES = new Set(["i", "i'm", "i'd", "i'll", "i've", "ok", "okay", "mr", "mrs", "ms", "dr", "sir"]);
+
+// Names of people and places: words the author capitalizes even mid-sentence.
+function findNames(text) {
+  const cap = new Map();
+  const low = new Map();
+  const re = /([.!?…"“”]\s*|^\s*)?\b([A-Za-z][a-z]+(?:-[A-Za-z][a-z]+)*)\b/gm;
+  for (const m of text.replace(/[’‘]/g, "'").matchAll(re)) {
+    const word = m[2];
+    const key = word.toLowerCase();
+    if (/^[A-Z]/.test(word)) {
+      if (!m[1]) count(cap, key); // ignore sentence-initial capitals
+    } else {
+      count(low, key);
+    }
+  }
+  return new Map([...cap].filter(([k, c]) =>
+    c >= 2 && (low.get(k) ?? 0) <= c * 0.2 && !STOPWORDS.has(k) && !NOT_NAMES.has(k)));
+}
+
+const SPEECH_VERBS = "said|says|asked|asks|replied|yelled|shouted|whispered|muttered|mumbled|answered|continued|interjected|ordered|called|cried|added|snapped|laughed|sighed|explained|insisted|admitted|began|demanded|pleaded|told|responded|exclaimed";
+
+// How dialogue gets tagged: which verbs, and whether adverbs ride along ("said plainly").
+function dialogueTags(text) {
+  const verbs = new Map();
+  const adverbs = new Map();
+  const tagRe = new RegExp(`\\b(${SPEECH_VERBS})\\b(?:\\s+(\\w+ly)\\b)?`, "gi");
+  for (const m of text.matchAll(tagRe)) {
+    count(verbs, m[1].toLowerCase());
+    if (m[2] && !["only", "early", "family", "really"].includes(m[2].toLowerCase())) count(adverbs, `${m[1].toLowerCase()} ${m[2].toLowerCase()}`);
+  }
+  const thoughts = (text.match(/\bthought to (?:himself|herself|themselves|myself)\b|\bsaid to (?:himself|herself|themselves|myself)\b/gi) ?? []).length;
+  return { verbs: top(verbs, 10, 1), adverbs: top(adverbs, 15, 1), thoughts };
+}
+
 export function analyze(text) {
   const w = words(text);
   const total = w.length;
   const sents = sentences(text);
   const paras = paragraphs(text);
 
+  const names = findNames(text);
   const wordCounts = new Map();
   const phraseCounts = new Map();
   const openerCounts = new Map();
-  for (const x of w) if (!STOPWORDS.has(x) && x.length > 2) count(wordCounts, x);
+  for (const x of w) if (!STOPWORDS.has(x) && !names.has(x) && x.length > 2) count(wordCounts, x);
 
   for (const s of sents) {
-    const sw = words(s);
+    // Character names become [name] so "Torin said" and "Quinn said" count as one habit.
+    const sw = words(s).map((x) => (names.has(x) ? "[name]" : x));
     count(openerCounts, sw.slice(0, sw[0]?.length <= 3 ? 2 : 1).join(" "));
     for (let n = 2; n <= 4; n++) {
       for (let i = 0; i + n <= sw.length; i++) {
         const gram = sw.slice(i, i + n);
         // Skip phrases made only of filler words, like "of the" or "it was"
-        if (gram.every((g) => STOPWORDS.has(g))) continue;
+        if (gram.every((g) => STOPWORDS.has(g) || g === "[name]")) continue;
+        // Keep name phrases only when they show a habit, like "[name] asked"
+        if (gram.includes("[name]") && !(gram[0] === "[name]" && /ed$|^(knew|said|thought|took|felt|saw|was|had|ran|made)$/.test(gram[1]))) continue;
         count(phraseCounts, gram.join(" "));
       }
     }
@@ -129,6 +168,8 @@ export function analyze(text) {
       // Drop a short phrase when a longer one containing it is just as common
       !all.some(([q, c]) => q !== p && q.includes(p) && c >= all[i][1])).slice(0, 25),
     openers: top(openerCounts, 12, 2),
+    names: top(new Map([...names.keys()].map((k) => [k, w.filter((x) => x === k).length])), 40, 2),
+    dialogue: dialogueTags(text),
     aiTellsUsed: AI_TELLS.filter((t) => lower.includes(` ${t} `)),
     vocabulary: new Set(w),
   };
@@ -145,9 +186,12 @@ export function pickExcerpts(text, stats, maxChars = 1400) {
     score: Math.abs(avgSentenceOf(p) - stats.avgSentence) + (AI_TELLS.some((t) => p.toLowerCase().includes(t)) ? 50 : 0),
   }));
   scored.sort((a, b) => a.score - b.score);
+  // Show range: the best narration paragraph and the best dialogue paragraph first.
+  const firstOf = (f) => scored.find((x) => f(x.p));
+  const ordered = [...new Set([firstOf((p) => !hasDialogue(p)), firstOf(hasDialogue), ...scored].filter(Boolean))];
   const out = [];
   let used = 0;
-  for (const { p } of scored) {
+  for (const { p } of ordered) {
     if (used + p.length > maxChars) continue;
     out.push(p);
     used += p.length;
@@ -155,6 +199,8 @@ export function pickExcerpts(text, stats, maxChars = 1400) {
   }
   return out;
 }
+
+const hasDialogue = (p) => /["“]/.test(p);
 
 function avgSentenceOf(p) {
   const l = sentences(p).map((s) => words(s).length);
@@ -173,7 +219,9 @@ export function buildProfile(stats, { authorName, starred = [], hidden = [], exc
   const keep = (w) => !hidden.includes(w);
   const sigWords = [...new Set([...starred, ...stats.words.map(([w]) => w)])].filter(keep).slice(0, 40);
   const phrases = stats.phrases.map(([p]) => p).filter(keep).slice(0, 15);
-  const openers = stats.openers.map(([o]) => `"${o[0].toUpperCase()}${o.slice(1)}…"`).slice(0, 8);
+  const openers = stats.openers.map(([o]) => `"${o.replace(/^\[name\]/, "[Name]").replace(/^[a-z]/, (c) => c.toUpperCase())}…"`).slice(0, 8);
+  const d = stats.dialogue ?? { verbs: [], adverbs: [], thoughts: 0 };
+  const names = (stats.names ?? []).map(([n]) => n[0].toUpperCase() + n.slice(1));
   const p = stats.punctuation;
   const habits = [
     noDashes ? "em dashes never" : `em dashes ${describeRate(p["em dashes (—)"], { often: 4, some: 1 })}`,
@@ -207,6 +255,14 @@ export function buildProfile(stats, { authorName, starred = [], hidden = [], exc
     "",
     "HOW I OFTEN START SENTENCES",
     openers.join(", ") || "(add more writing to fill this in)",
+    ...(d.verbs.length ? [
+      "",
+      "DIALOGUE",
+      `- I tag dialogue with: ${d.verbs.slice(0, 6).map(([v]) => v).join(", ")}.`,
+      ...(d.adverbs.length ? [`- I often add an adverb to the tag, like: ${d.adverbs.slice(0, 8).map(([a]) => a).join(", ")}.`] : []),
+      ...(d.thoughts ? [`- Characters think to themselves in quotes ("he thought to himself").`] : []),
+    ] : []),
+    ...(names.length ? ["", "CHARACTERS AND PLACES", names.slice(0, 25).join(", ")] : []),
     "",
     "NEVER USE THESE WORDS",
     avoid.join(", "),
@@ -235,6 +291,9 @@ export function vocabularyCsv(stats, { starred = [], hidden = [] } = {}) {
   add("word", stats.words);
   add("phrase", stats.phrases);
   add("sentence opener", stats.openers);
+  add("character or place", stats.names ?? []);
+  add("dialogue tag", stats.dialogue?.verbs ?? []);
+  add("dialogue tag + adverb", stats.dialogue?.adverbs ?? []);
   for (const [k, v] of Object.entries(stats.punctuation)) rows.push(["punctuation", k, "", v, ""]);
   for (const t of AI_TELLS) if (!stats.aiTellsUsed.includes(t)) rows.push(["avoid (AI word)", t, 0, 0, ""]);
   return rows.map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
