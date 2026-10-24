@@ -205,6 +205,29 @@
 
       <div class="tab-panel" data-panel="images" hidden>
         <p class="muted">Creates pictures with an image program on your computer. Pictures are kept privately in this app. Adults only: requests involving anyone under 18 are refused, and never use real people.</p>
+        <h3>Characters</h3>
+        <div id="char-list" class="char-list"></div>
+        <small id="char-hint" hidden>Tick who's in the picture. Their description is added and their face is matched to the reference.</small>
+        <button type="button" id="char-add" class="secondary">+ Add character</button>
+        <div id="char-editor" class="card" hidden>
+          <label>Name
+            <input id="char-name" type="text" autocomplete="off" placeholder="e.g. Quinn">
+          </label>
+          <label>What they look like
+            <textarea id="char-desc" rows="2" placeholder="e.g. woman, shoulder-length blonde hair, ice blue eyes, slim"></textarea>
+          </label>
+          <label class="secondary file-btn">Choose reference picture
+            <input id="char-file" type="file" accept="image/*" hidden>
+          </label>
+          <img id="char-preview" class="char-preview" alt="" hidden>
+          <small>Use an AI-generated or drawn picture of an adult character. Never a real person.</small>
+          <div class="btn-row">
+            <button type="button" id="char-save" class="primary">Save character</button>
+            <button type="button" id="char-cancel" class="secondary">Cancel</button>
+            <button type="button" id="char-delete" class="danger" hidden>Delete</button>
+          </div>
+        </div>
+
         <label>Describe the picture
           <textarea id="img-prompt" rows="4" placeholder="e.g. woman with long black hair in a loose knot, candlelit room, fireplace, cinematic lighting, photo"></textarea>
         </label>
@@ -234,6 +257,13 @@
               <option value="35">35: more detail</option>
             </select>
           </label>
+          <label>How closely to match character faces
+            <select id="img-face-weight">
+              <option value="0.5">Loosely (more freedom for the scene)</option>
+              <option value="0.7">Closely</option>
+              <option value="0.9">Very closely</option>
+            </select>
+          </label>
           <label>Things to avoid
             <textarea id="img-negative" rows="2"></textarea>
           </label>
@@ -251,6 +281,7 @@
             <li>Download an image model into <code>webui\models\Stable-diffusion</code>. Fast one (2.1 GB):<br><code>huggingface.co/philz1337x/epicrealism/resolve/main/epicrealism_naturalSinRC1VAE.safetensors</code></li>
             <li>Double-click <code>update.bat</code> once, then <code>run.bat</code>. The first start takes a few minutes. When a browser page for Forge opens, it's ready; leave the black window open.</li>
             <li>Back here, open <strong>Image settings → Test connection</strong>.</li>
+            <li>For character faces: download the face-reference model (98 MB) into <code>webui\models\ControlNet</code>:<br><code>huggingface.co/h94/IP-Adapter/resolve/main/models/ip-adapter-plus-face_sd15.safetensors</code><br>then restart Forge. The first character picture downloads a 2.5 GB helper automatically, so it takes a while once.</li>
           </ol>
         </details>
       </div>
@@ -426,7 +457,7 @@
         <button type="button" id="delete-models" class="secondary">Delete downloaded models</button>
         <button type="button" id="erase-all" class="danger">Erase everything</button>
       </div>
-      <p class="muted version">Confidant version 18</p>
+      <p class="muted version">Confidant version 19</p>
     </form>
   </dialog>
 
@@ -437,6 +468,7 @@
       <div class="btn-row">
         <button type="button" id="img-viewer-save" class="primary">Save</button>
         <button type="button" id="img-viewer-reuse" class="secondary">Use description</button>
+        <button type="button" id="img-viewer-character" class="secondary">Make a character from this</button>
         <button type="button" id="img-viewer-delete" class="danger">Delete</button>
         <button value="close" class="link">Close</button>
       </div>

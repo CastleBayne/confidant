@@ -19,11 +19,42 @@ let busy = false;
 
 const S = () => ctx.data().settings;
 let saved = null; // loaded on first use; cleared when the app locks
+let characters = null; // [{ id, name, description, ref }], same lifecycle
+let editingChar = null;
+const persistCharacters = () => saveExtra("characters", characters).catch((e) => console.error("Saving characters failed", e));
 const store = () => saved ?? [];
 const persistImages = () => saveExtra("images", saved).catch((e) => console.error("Saving images failed", e));
 
 export function forgetImages() {
   saved = null;
+  characters = null;
+}
+
+// Character references: scaled down so storage stays small and Forge gets a
+// sensible size. Returns a JPEG data URL.
+async function shrink(src, max = 768) {
+  const img = new Image();
+  img.src = src;
+  await img.decode();
+  const scale = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+  const c = document.createElement("canvas");
+  c.width = Math.round(img.naturalWidth * scale);
+  c.height = Math.round(img.naturalHeight * scale);
+  c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+  return c.toDataURL("image/jpeg", 0.9);
+}
+
+// Face matching uses Forge's built-in IP-Adapter. Returns the ControlNet
+// model name to use for this image size, or null if it isn't installed.
+async function faceAdapterModel(large) {
+  try {
+    const { model_list: models = [] } = await (await fetch(`${base()}/controlnet/model_list`)).json();
+    const adapters = models.filter((m) => /ip-adapter/i.test(m));
+    const fit = adapters.filter((m) => (large ? /sdxl/i.test(m) : !/sdxl/i.test(m)));
+    return fit.find((m) => /face/i.test(m)) ?? fit[0] ?? null;
+  } catch {
+    return null;
+  }
 }
 
 // PNGs from the image program are large; JPEG keeps storage small.
@@ -40,7 +71,7 @@ async function toJpeg(pngBase64) {
 const base = () => S().imagesUrl.replace(/\/+$/, "");
 
 export function freshImageSettings() {
-  return { imagesUrl: "http://127.0.0.1:7860", imageSize: "512x768", imageSteps: 25, imageNegative: DEFAULT_NEGATIVE };
+  return { imagesUrl: "http://127.0.0.1:7860", imageSize: "512x768", imageSteps: 25, imageNegative: DEFAULT_NEGATIVE, imageFaceWeight: 0.7 };
 }
 
 export function initImages(context) {
@@ -48,13 +79,30 @@ export function initImages(context) {
   $("img-generate").addEventListener("click", generate);
   $("img-stop").addEventListener("click", () => fetch(`${base()}/sdapi/v1/interrupt`, { method: "POST" }).catch(() => {}));
   $("img-from-notes").addEventListener("click", promptFromNotes);
+  $("char-add").addEventListener("click", () => openCharEditor());
+  $("char-cancel").addEventListener("click", () => ($("char-editor").hidden = true));
+  $("char-save").addEventListener("click", saveCharacter);
+  $("char-file").addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+    const url = URL.createObjectURL(file);
+    try {
+      $("char-preview").src = await shrink(url);
+      $("char-preview").hidden = false;
+    } catch {
+      alert("That file couldn't be read as a picture.");
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  });
   $("img-test").addEventListener("click", async () => {
     $("img-status").textContent = "Checking…";
     const r = await checkImages(base());
     $("img-status").textContent = r.message;
     $("img-status").className = r.ok ? "ok" : "error";
   });
-  for (const [id, key, num] of [["img-size", "imageSize"], ["img-steps", "imageSteps", true], ["img-negative", "imageNegative"], ["img-url", "imagesUrl"]]) {
+  for (const [id, key, num] of [["img-size", "imageSize"], ["img-steps", "imageSteps", true], ["img-negative", "imageNegative"], ["img-url", "imagesUrl"], ["img-face-weight", "imageFaceWeight", true]]) {
     $(id).addEventListener("change", (e) => {
       S()[key] = num ? Number(e.target.value) : e.target.value.trim();
       ctx.persist();
@@ -64,7 +112,10 @@ export function initImages(context) {
 
 export async function renderImages() {
   saved ??= (await loadExtra("images")) ?? [];
+  characters ??= (await loadExtra("characters")) ?? [];
+  renderCharacters();
   const s = S();
+  $("img-face-weight").value = String(s.imageFaceWeight ?? 0.7);
   $("img-url").value = s.imagesUrl;
   $("img-size").value = s.imageSize;
   $("img-steps").value = String(s.imageSteps);
@@ -96,8 +147,12 @@ export async function checkImages(url) {
 
 async function generate() {
   if (busy) return;
-  const prompt = $("img-prompt").value.trim();
-  if (!prompt) return;
+  const typed = $("img-prompt").value.trim();
+  const cast = (characters ?? []).filter((c) => $(`char-pick-${c.id}`)?.checked);
+  if (!typed && !cast.length) return;
+  // Each chosen character's description leads the prompt, so the image model
+  // sees who is in the picture before the scene.
+  const prompt = [...cast.map((c) => c.description), typed].filter(Boolean).join(", ");
   if (MINOR_TERMS.test(prompt)) {
     $("img-status").textContent = "Confidant won't make images involving anyone under 18. Describe adult characters only.";
     $("img-status").className = "error";
@@ -106,6 +161,21 @@ async function generate() {
   const s = S();
   const [width, height] = s.imageSize.split("x").map(Number);
   setBusy(true);
+  const adapter = cast.length ? await faceAdapterModel(width > 768 || height > 768) : null;
+  // Forge has 3 ControlNet slots by default; one per character, up to 3.
+  const units = adapter
+    ? cast.slice(0, 3).map((c) => ({
+        enabled: true,
+        module: "CLIP-ViT-H (IPAdapter)",
+        model: adapter,
+        weight: (s.imageFaceWeight ?? 0.7) / Math.max(1, Math.min(cast.length, 3) * 0.75),
+        image: c.ref,
+        resize_mode: "Crop and Resize",
+        control_mode: "Balanced",
+        guidance_start: 0,
+        guidance_end: 1,
+      }))
+    : [];
   $("img-status").className = "muted";
   $("img-status").textContent = "Creating… the first image after starting Forge takes longer.";
   const poll = setInterval(async () => {
@@ -127,6 +197,7 @@ async function generate() {
         cfg_scale: 6,
         sampler_name: "DPM++ 2M",
         scheduler: "Karras",
+        ...(units.length ? { alwayson_scripts: { ControlNet: { args: units } } } : {}),
       }),
     });
     if (!res.ok) throw new Error(`error ${res.status}`);
@@ -136,7 +207,10 @@ async function generate() {
     saved.unshift({ id: uid(), prompt, src: await toJpeg(image), created: Date.now() });
     saved.splice(MAX_SAVED);
     persistImages();
-    $("img-status").textContent = "";
+    $("img-status").textContent = cast.length && !adapter
+      ? "Made from the characters' descriptions only. To match their faces too, install the face-reference model (see setup step 7)."
+      : "";
+    $("img-status").className = "muted";
     renderGallery();
   } catch (e) {
     const r = await checkImages(base());
@@ -200,6 +274,10 @@ function openViewer(img) {
   const dlg = $("img-viewer");
   $("img-viewer-pic").src = img.src;
   $("img-viewer-prompt").textContent = img.prompt;
+  $("img-viewer-character").onclick = () => {
+    dlg.close();
+    openCharEditor(null, img.src);
+  };
   $("img-viewer-reuse").onclick = () => {
     $("img-prompt").value = img.prompt;
     dlg.close();
@@ -223,4 +301,67 @@ function openViewer(img) {
     renderGallery();
   };
   dlg.showModal();
+}
+
+// ---------- Characters ----------
+
+function renderCharacters() {
+  const list = $("char-list");
+  list.replaceChildren();
+  for (const c of characters ?? []) {
+    const card = document.createElement("div");
+    card.className = "char-card";
+    const pick = document.createElement("input");
+    pick.type = "checkbox";
+    pick.id = `char-pick-${c.id}`;
+    const label = document.createElement("label");
+    label.htmlFor = pick.id;
+    const img = document.createElement("img");
+    img.src = c.ref;
+    img.alt = "";
+    const name = document.createElement("span");
+    name.textContent = c.name;
+    label.append(img, name);
+    const edit = document.createElement("button");
+    edit.type = "button";
+    edit.className = "link";
+    edit.textContent = "Edit";
+    edit.addEventListener("click", () => openCharEditor(c));
+    card.append(pick, label, edit);
+    list.append(card);
+  }
+  $("char-hint").hidden = !(characters ?? []).length;
+}
+
+function openCharEditor(c = null, src = null) {
+  editingChar = c;
+  $("char-name").value = c?.name ?? "";
+  $("char-desc").value = c?.description ?? "";
+  $("char-preview").src = c?.ref ?? src ?? "";
+  $("char-preview").hidden = !(c?.ref ?? src);
+  $("char-delete").hidden = !c;
+  $("char-delete").onclick = () => {
+    if (!confirm(`Delete ${c.name}?`)) return;
+    characters = characters.filter((x) => x.id !== c.id);
+    persistCharacters();
+    $("char-editor").hidden = true;
+    renderCharacters();
+  };
+  $("char-editor").hidden = false;
+  $("char-name").focus();
+}
+
+async function saveCharacter() {
+  const name = $("char-name").value.trim();
+  const description = $("char-desc").value.trim();
+  const ref = $("char-preview").hidden ? "" : $("char-preview").src;
+  if (!name || !ref) return alert("Give the character a name and a reference picture.");
+  if (MINOR_TERMS.test(`${name} ${description}`)) return alert("Characters must be adults.");
+  characters ??= (await loadExtra("characters")) ?? [];
+  const small = await shrink(ref);
+  if (editingChar) Object.assign(editingChar, { name, description, ref: small });
+  else characters.push({ id: uid(), name, description, ref: small });
+  persistCharacters();
+  $("char-editor").hidden = true;
+  renderCharacters();
 }
