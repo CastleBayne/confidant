@@ -10,9 +10,18 @@ export async function checkComputer(base, model) {
   try {
     res = await fetch(`${trimSlash(base)}/api/tags`, { signal: AbortSignal.timeout(5000) });
   } catch {
+    // A no-cors request succeeds whenever the server answers, even if it
+    // refuses this site, which tells "not running" apart from "not allowed".
+    let answers = false;
+    try {
+      await fetch(trimSlash(base), { mode: "no-cors", signal: AbortSignal.timeout(5000) });
+      answers = true;
+    } catch {}
     return {
       ok: false,
-      message: "Can't reach Ollama. Make sure it's running on the computer (its llama icon is in the taskbar tray) and that OLLAMA_ORIGINS is set as described in the setup steps, then restart Ollama.",
+      message: answers
+        ? "Ollama is running, but it isn't letting Confidant connect yet. Run the setx OLLAMA_ORIGINS command from the setup steps, then fully quit Ollama (right-click its llama icon → Quit) and open it again. If that doesn't do it, restart the computer."
+        : `Can't reach Ollama. Open Ollama from the Start menu, then check that ${trimSlash(base)} shows "Ollama is running" in a browser tab. If it does, the browser may have blocked access: click the icon left of the address bar and allow access to devices on your network.`,
     };
   }
   if (!res.ok) return { ok: false, message: `Ollama answered with an error (${res.status}).` };
