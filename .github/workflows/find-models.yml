@@ -1,0 +1,15 @@
+# One-off lookup: Forge txt2img API fields for hires fix and face restore.
+name: Forge hires
+on:
+  push:
+    branches: [gh-pages]
+    paths: [".github/workflows/find-models.yml"]
+jobs:
+  find:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          git clone -q --depth 1 https://github.com/lllyasviel/stable-diffusion-webui-forge forge && cd forge
+          echo "=== hr fields"; grep -rn "hr_additional_modules\|hr_upscaler\|hr_scale\|enable_hr\|restore_faces\|hr_second_pass_steps\|hr_cfg\|hr_distilled" modules/processing.py modules/api/models.py modules/api/api.py | head -40
+          echo "=== latent upscalers"; grep -rn "latent_upscale_modes = {" -A12 modules/shared*.py | head -20
+          echo "=== face restoration in forge"; ls modules | grep -i "face\|codeformer\|gfpgan"
