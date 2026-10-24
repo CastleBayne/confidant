@@ -483,6 +483,10 @@ function buildRequest(mode, ch, selection) {
 // the point to continue from. No chat framing, so the model writes as the
 // next lines of the author's own manuscript.
 function continuationPrompt(ch) {
+  return manuscriptPrompt({ title: ch.title, notes: ch.notes, text: ch.text, excludeId: ch.id });
+}
+
+function manuscriptPrompt({ title, notes, text, excludeId }) {
   const total = promptChars();
   const s = W().samples.length ? voiceStats() : null;
   const rules = [
@@ -494,18 +498,35 @@ function continuationPrompt(ch) {
     ctx.data().settings.adultContent && "intimate and sexual scenes between the adult characters are written plainly and in full when the story calls for them",
     noDashes() && "no dashes",
   ].filter(Boolean);
-  const chapterText = tail(ch.text, Math.round(total * 0.3)).trimEnd();
-  const notes = ch.notes.trim().slice(0, 1500);
+  const chapterText = tail(text ?? "", Math.round(total * 0.3)).trimEnd();
+  const note = (notes ?? "").trim().slice(0, 1500);
   // 0.85: the chars-per-token estimate is rough; leave headroom in the window.
-  const story = storySoFar(Math.max(800, Math.round(total * 0.85) - chapterText.length - notes.length - 600), ch.id);
+  const story = storySoFar(Math.max(800, Math.round(total * 0.85) - chapterText.length - note.length - 600), excludeId);
   return [
     `[Style: ${rules.join("; ")}.]`,
     story,
     "* * *",
-    ch.title || "Next chapter",
-    ...(notes ? [`[Author's note: what happens next: ${notes}]`] : []),
+    title || "",
+    ...(note ? [`[Author's note: what happens next: ${note}]`] : []),
     chapterText,
   ].filter(Boolean).join("\n\n") + "\n\n";
+}
+
+const ASKS_TO_WRITE = /\b(continue|keep going|keep writing|write|finish|next|what happens|carry on|pick up)\b/i;
+
+// When a chat message is a pasted passage (optionally with a short request
+// like "continue this" before or after it), returns a manuscript prompt so
+// the model carries on the passage in the author's voice. Otherwise null.
+export function passagePrompt(message) {
+  const paras = message.trim().split(/\n\s*\n|\n/).map((p) => p.trim()).filter(Boolean);
+  if (message.length < 400 || paras.length < 2) return null;
+  let note = "";
+  if (paras[0].length < 200 && ASKS_TO_WRITE.test(paras[0])) note = paras.shift();
+  else if (paras.at(-1).length < 200 && ASKS_TO_WRITE.test(paras.at(-1))) note = paras.pop();
+  const passage = paras.join("\n\n");
+  // Prose, not a question: several sentences of story text.
+  if (passage.length < 300 || (passage.match(/[.!?…]["”’]?(\s|$)/g) ?? []).length < 4) return null;
+  return manuscriptPrompt({ notes: /^\s*(continue|keep going|keep writing|carry on)\b[^.]*\.?\s*$/i.test(note) ? "" : note, text: passage });
 }
 
 async function generate(mode) {

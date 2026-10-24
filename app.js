@@ -1,6 +1,6 @@
 import * as store from "./store.js";
 import { MODELS, DEFAULT_MODEL, CUSTOM_CTX, resolveModelId, hostedRecords } from "./models.js";
-import { freshWriting, initWriting, showWriting, writingContext } from "./writing.js";
+import { freshWriting, initWriting, showWriting, writingContext, passagePrompt } from "./writing.js";
 import { stripDashes } from "./voice.js";
 import { freshImageSettings, forgetImages } from "./images.js";
 import { isGgufDownloaded } from "./gguf-engine.js";
@@ -354,12 +354,17 @@ async function send(text) {
   const bubble = document.querySelector(`[data-id="${reply.id}"] .bubble`);
   bubble.classList.add("typing");
   try {
-    const stream = await engine.chat.completions.create({
-      messages: contextMessages(c.messages.slice(0, -1)),
-      stream: true,
-      temperature: data.settings.temperature,
-      max_tokens: REPLY_TOKENS,
-    });
+    // A pasted passage of the user's writing: continue it as their manuscript
+    // (plain text, no chat framing), which keeps their voice far better.
+    const manuscript = text && engine.completions ? passagePrompt(text) : null;
+    const stream = manuscript
+      ? await engine.completions.create({ prompt: manuscript, stop: ["[", "* * *"], max_tokens: REPLY_TOKENS, temperature: 0.9, top_p: 0.92, frequency_penalty: 0.4, presence_penalty: 0.3 })
+      : await engine.chat.completions.create({
+          messages: contextMessages(c.messages.slice(0, -1)),
+          stream: true,
+          temperature: data.settings.temperature,
+          max_tokens: REPLY_TOKENS,
+        });
     for await (const chunk of stream) {
       reply.content += chunk.choices[0]?.delta?.content ?? "";
       if (data.settings.noDashes) reply.content = stripDashes(reply.content);
