@@ -28,7 +28,10 @@ jobs:
           python-version: "3.11"
 
       - name: Install MLC LLM
-        run: pip install --pre -U -f https://mlc.ai/wheels mlc-llm-nightly-cpu mlc-ai-nightly-cpu huggingface_hub
+        run: |
+          pip install --pre -U -f https://mlc.ai/wheels mlc-llm-nightly-cpu mlc-ai-nightly-cpu huggingface_hub
+          pip list 2>/dev/null | grep -i -E "mlc|tvm"
+          python -c "import mlc_llm, tvm; print('mlc_llm', mlc_llm.__file__); print('tvm', tvm.__version__)"
 
       # Some uploads get gated or removed, so try known copies, then search.
       - name: Download source model
@@ -65,8 +68,8 @@ jobs:
 
       - name: Convert to MLC format
         run: |
-          mlc_llm convert_weight src --quantization q4f16_1 -o "$OUT"
-          mlc_llm gen_config src --quantization q4f16_1 --conv-template llama-3_1 \
+          python -m mlc_llm convert_weight src --quantization q4f16_1 -o "$OUT"
+          python -m mlc_llm gen_config src --quantization q4f16_1 --conv-template llama-3_1 \
             --context-window-size 4096 --prefill-chunk-size 1024 -o "$OUT"
           # Newer WebLLM reads tensor-cache.json; older converters write ndarray-cache.json
           if [ -f "$OUT/ndarray-cache.json" ] && [ ! -f "$OUT/tensor-cache.json" ]; then
