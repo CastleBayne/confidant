@@ -43,6 +43,12 @@ export function initWriting(context) {
   $("sample-cancel").addEventListener("click", () => ($("sample-editor").hidden = true));
   $("sample-save").addEventListener("click", saveSample);
   $("sample-file").addEventListener("change", importFiles);
+  $("train-export").addEventListener("click", () => {
+    const w = W();
+    if (!w.samples.length) return alert("Add some of your own writing under Samples first.");
+    const text = w.samples.map((x) => x.text.trim()).join("\n\n* * *\n\n");
+    saveFile("my-writing.txt", text, "text/plain");
+  });
 
   // Voice
   $("voice-regen").addEventListener("click", () => {
@@ -140,6 +146,9 @@ function renderSamples() {
   const total = W().samples.reduce((n, s) => n + words(s.text).length, 0);
   $("samples-total").textContent = total
     ? `${total.toLocaleString()} words of your writing${total < 5000 ? " (add more for a stronger profile)" : ""}`
+    : "";
+  $("train-words").textContent = total
+    ? total < 20000 ? `(${total.toLocaleString()} words: training works best with 20,000+)` : `(${total.toLocaleString()} words)`
     : "";
   const list = $("sample-list");
   list.replaceChildren();

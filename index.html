@@ -121,6 +121,16 @@
           </div>
         </div>
         <ul id="sample-list" class="item-list"></ul>
+        <details class="card train">
+          <summary>Train a writing model on your own writing</summary>
+          <p class="muted">Teaches the writing model your style for good, using a free graphics card on Google Colab (with your Google account). Takes about an hour. Only your samples are used, never Book chapters, which may hold AI text.</p>
+          <ol>
+            <li><button type="button" id="train-export" class="secondary">Download my writing</button> <span id="train-words" class="muted"></span></li>
+            <li><a href="https://colab.research.google.com/github/CastleBayne/confidant/blob/gh-pages/train-my-voice.ipynb" target="_blank" rel="noopener">Open the training notebook</a> and follow the steps in it.</li>
+            <li>It gives you a file called <code>my-voice.zip</code>. The notebook's last step says how to add it to Ollama in one command.</li>
+            <li>In Settings, set <strong>Writing model in Ollama</strong> to <code>my-voice</code>.</li>
+          </ol>
+        </details>
       </div>
 
       <div class="tab-panel" data-panel="voice" hidden>
@@ -515,7 +525,7 @@
         <button type="button" id="delete-models" class="secondary">Delete downloaded models</button>
         <button type="button" id="erase-all" class="danger">Erase everything</button>
       </div>
-      <p class="muted version">Confidant version 38</p>
+      <p class="muted version">Confidant version 39</p>
     </form>
   </dialog>
 

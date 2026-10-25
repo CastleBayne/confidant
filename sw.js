@@ -1,7 +1,7 @@
 // Lets the app open with no internet connection. When online, app files are
 // fetched fresh (bypassing the browser's HTTP cache) so updates arrive on
 // the next launch. Model files are cached separately by WebLLM.
-const VERSION = 38;
+const VERSION = 39;
 const CACHE = `confidant-app-v${VERSION}`;
 // Engine files are large and versioned by folder, so they live in a cache
 // that survives app updates instead of being downloaded again each time.
